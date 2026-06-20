@@ -1,0 +1,27 @@
+Subject: Software Engineer Opportunities at {{company}}
+
+Hi {{name}},
+
+I hope you're doing well.
+
+I am reaching out regarding Software Engineer opportunities at {{company}}.
+
+I have experience building backend systems, AI-powered applications, and scalable software using Python, FastAPI, AWS, and modern AI frameworks.
+
+Some recent work includes:
+
+* Production-grade RAG systems
+* Backend API development
+* AI and Machine Learning applications
+
+I would love to explore whether my background aligns with any current or upcoming opportunities at {{company}}.
+
+Thank you for your time and consideration.
+
+Best Regards,
+
+Tanmay Dikshit
+
+LinkedIn: {{linkedin}}
+
+GitHub: {{github}}
