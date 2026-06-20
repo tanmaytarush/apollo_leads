@@ -1,470 +1,346 @@
-Recruiter Outreach Automation Tool
+# SDE Job Outreach Automation
 
-Overview
+A lightweight, local-first tool for **Software Engineering job search outreach**. Discover recruiters and hiring managers at target companies, review contacts manually, and send thoughtful emails from your personal Gmail account.
 
-Build a local-first Next.js application that automates recruiter discovery and job outreach.
+> **Personal use only.** Not built for mass emailing, CRM, or multi-user workflows.
 
-The application is intended for personal use only.
+---
+
+## Philosophy
+
+The goal is **not** to blast hundreds of emails.
 
 The goal is to:
 
-1. Upload a list of target companies.
-2. Discover recruiters and hiring managers using Apollo.
-3. Store discovered contacts in a CSV file.
-4. Review contacts manually.
-5. Mark which contacts should receive emails.
-6. Send emails using a predefined template.
-7. Send emails from my existing Gmail account.
-8. Track email status through CSV files.
+- Find the **right people** at target companies
+- **Review every contact** before anything is sent
+- Send **high-quality, template-based** outreach
+- **Track progress** in simple CSV files
 
-No database is required.
+Simplicity over automation.
 
-No authentication is required.
+---
 
-No AI generation is required.
+## Features
 
-No cloud deployment is required.
+| Feature | Description |
+| -------- | ----------- |
+| **Company list** | Upload `companies.csv` with your target employers |
+| **Apollo discovery** | Find recruiters, EMs, hiring managers, and team leads per company |
+| **Contact export** | Save results to `contacts.csv` (email when Apollo provides it, blank otherwise) |
+| **Manual review** | Edit contacts, add emails, remove duplicates, add notes |
+| **Send selection** | Mark `send_email` / `special_mail` per contact |
+| **Email preview** | Review subject and body before sending |
+| **Gmail sending** | Send via Nodemailer + Gmail App Password |
+| **Status tracking** | `PENDING` · `SENT` · `FAILED` · `SKIPPED` |
 
-The application will run locally.
+---
 
-⸻
+## Tech Stack
 
-Tech Stack
+| Layer | Technology |
+| ----- | ---------- |
+| Frontend | Next.js 15, TypeScript, Tailwind CSS |
+| Integrations | Apollo API, Gmail SMTP (Nodemailer) |
+| Storage | CSV files (`data/`) |
+| Runtime | Local machine only |
 
-Frontend:
+**Intentionally excluded:** database, authentication, cloud deployment, AI personalization.
 
-* Next.js 15
-* TypeScript
-* TailwindCSS
+---
 
-Integrations:
+## Quick Start
 
-* Apollo API
-* Gmail SMTP (via Nodemailer)
+### Prerequisites
 
-Storage:
+- Node.js 18+
+- [Apollo](https://www.apollo.io/) account with API access (master API key recommended)
+- Gmail account with [App Password](https://myaccount.google.com/apppasswords) enabled
 
-* CSV Files
+### Install & run
 
-⸻
-
-Core Workflow
-
-Step 1 - Upload Companies
-
-Input file:
-
-companies.csv
-
-Example:
-
-company_name
-
-Groww
-
-Razorpay
-
-PhonePe
-
-Juspay
-
-⸻
-
-Step 2 - Recruiter Discovery
-
-For every company:
-
-Search Apollo.
-
-Retrieve:
-
-* Technical Recruiters
-* Recruiters
-* Talent Acquisition Specialists
-* Hiring Managers
-* Engineering Managers
-* Team Leads
-
-Store results into contacts.csv.
-
-⸻
-
-Step 3 - Manual Review
-
-User reviews all contacts.
-
-User may:
-
-* Remove incorrect contacts
-* Remove duplicate contacts
-* Add contacts manually
-* Edit contact information
-
-No emails are sent automatically.
-
-⸻
-
-Step 4 - Mark Contacts
-
-User marks contacts inside contacts.csv.
-
-Columns:
-
-send_email
-
-special_mail
-
-Examples:
-
-YES
-
-NO
-
-⸻
-
-send_email
-
-Purpose:
-
-Determines whether an email should be sent.
-
-Values:
-
-YES
-
-NO
-
-⸻
-
-special_mail
-
-Purpose:
-
-Indicates that this contact will be handled manually.
-
-Values:
-
-YES
-
-NO
-
-If special_mail = YES, the system must skip the contact.
-
-⸻
-
-Step 5 - Send Emails
-
-Read contacts.csv.
-
-Only process rows where:
-
-send_email = YES
-
-special_mail = NO
-
-status = PENDING
-
-Send email using Gmail SMTP.
-
-⸻
-
-Step 6 - Update Status
-
-After sending:
-
-status = SENT
-
-If sending fails:
-
-status = FAILED
-
-⸻
-
-CSV Structure
-
-contacts.csv
-
-Columns:
-
-company_name
-
-person_name
-
-designation
-
-email
-
-linkedin_url
-
-contact_type
-
-send_email
-
-special_mail
-
-status
-
-Example:
-
-Groww,
-John Doe,
-Technical Recruiter,
-john@groww.in,
-https://linkedin.com/in/johndoe,
-Recruiter,
-YES,
-NO,
-PENDING
-
-⸻
-
-Email Template
-
-The application must use a single reusable email template.
-
-Template file:
-
-templates/default-email.txt
-
-The template supports variables.
-
-Supported variables:
-
-{{name}}
-
-{{company}}
-
-{{designation}}
-
-{{linkedin}}
-
-{{github}}
-
-Example:
-
-Subject: Software Engineer Opportunities at {{company}}
-
-Hi {{name}},
-
-I hope you’re doing well.
-
-I am reaching out regarding Software Engineer opportunities at {{company}}.
-
-I have experience building backend systems, AI-powered applications, and scalable software using Python, FastAPI, AWS, and modern AI frameworks.
-
-Some recent work includes:
-
-* Building production-grade RAG systems
-* Developing backend APIs
-* Working on AI and machine learning solutions
-
-I would love to explore whether my background aligns with any current or upcoming opportunities at {{company}}.
-
-Thank you for your time and consideration.
-
-Best Regards,
-
-Tanmay Dikshit
-
-LinkedIn: {{linkedin}}
-
-GitHub: {{github}}
-
-⸻
-
-Gmail Integration
-
-Use Nodemailer.
-
-Use Gmail SMTP.
-
-Emails must be sent from my existing Gmail account.
-
-Configuration:
-
-GMAIL_EMAIL
-
-GMAIL_APP_PASSWORD
-
-Use Gmail App Password authentication.
-
-Do not use Resend.
-
-Do not use SendGrid.
-
-Do not use Mailgun.
-
-Do not use AWS SES.
-
-⸻
-
-Application Pages
-
-Home Page
-
-Features:
-
-* Upload companies.csv
-* Upload contacts.csv
-* View current files
-* Navigation links
-
-⸻
-
-Recruiter Discovery Page
-
-Features:
-
-* Load companies.csv
-* Call Apollo API
-* Discover recruiters and managers
-* Display results in table
-* Export contacts.csv
-
-Table Columns:
-
-* Company
-* Name
-* Designation
-* Email
-* LinkedIn
-* Contact Type
-
-⸻
-
-Contact Review Page
-
-Features:
-
-* Load contacts.csv
-* Display editable table
-* Edit fields
-* Update send_email
-* Update special_mail
-* Save CSV
-
-Columns:
-
-* Company
-* Name
-* Designation
-* Email
-* Contact Type
-* Send Email
-* Special Mail
-* Status
-
-⸻
-
-Send Emails Page
-
-Features:
-
-* Load contacts.csv
-* Preview generated email
-* Send selected emails
-* Update status
-
-Display:
-
-* Company
-* Name
-* Email
-* Status
-
-Buttons:
-
-* Preview Email
-* Send Selected
-* Refresh
-
-⸻
-
-Project Structure
-
-/app
-
-/page.tsx
-
-/recruiters/page.tsx
-
-/review/page.tsx
-
-/send/page.tsx
-
-/app/api
-
-/apollo/search/route.ts
-
-/email/send/route.ts
-
-/lib
-
-/apollo.ts
-
-/gmail.ts
-
-/csv.ts
-
-/data
-
-/companies.csv
-
-/contacts.csv
-
-/templates
-
-/default-email.txt
-
-⸻
-
-Environment Variables
-
-APOLLO_API_KEY=
-
-GMAIL_EMAIL=
-
-GMAIL_APP_PASSWORD=
-
-LINKEDIN_URL=
-
-GITHUB_URL=
-
-⸻
-
-Non Goals
-
-Do not build:
-
-* Authentication
-* User accounts
-* Databases
-* AI personalization
-* OpenAI integration
-* CRM functionality
-* Campaign management
-* Follow-up automation
-* Multi-user support
-* Analytics
-
-These are out of scope.
-
-⸻
-
-Success Criteria
-
-The application is successful if it can:
-
-1. Import a list of companies.
-2. Discover recruiters through Apollo.
-3. Export contacts into CSV.
-4. Allow manual review.
-5. Allow contact selection.
-6. Send emails from my Gmail account.
-7. Update contact status after sending.
-
-The entire application must run locally through:
+```bash
+git clone <your-repo-url>
+cd apollo_leads
 
 npm install
 
+cp .env.example .env
+# Edit .env with your keys (see below)
+
 npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+### Build for production
+
+```bash
+npm run build
+npm start
+```
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env`:
+
+```env
+APOLLO_API_KEY=your_apollo_master_api_key
+GMAIL_EMAIL=your@gmail.com
+GMAIL_APP_PASSWORD=your_16_char_app_password
+LINKEDIN_URL=https://linkedin.com/in/yourprofile
+GITHUB_URL=https://github.com/yourusername
+```
+
+| Variable | Required | Purpose |
+| -------- | -------- | ------- |
+| `APOLLO_API_KEY` | Yes | People search + optional email enrichment |
+| `GMAIL_EMAIL` | Yes | Sender address for outreach |
+| `GMAIL_APP_PASSWORD` | Yes | Gmail SMTP auth (not your regular password) |
+| `LINKEDIN_URL` | Yes | Injected into email template |
+| `GITHUB_URL` | Yes | Injected into email template |
+
+Never commit `.env`. CSV data in `data/` is gitignored by default.
+
+---
+
+## Workflow
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│ Upload          │     │ Discover         │     │ Review          │
+│ companies.csv   │ ──► │ Contacts (Apollo)│ ──► │ contacts.csv    │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                        ┌──────────────────┐              │
+                        │ Send Emails      │ ◄────────────┘
+                        │ (Gmail SMTP)     │
+                        └──────────────────┘
+```
+
+### Phase 1 — Company input
+
+Upload `companies.csv` on the **Dashboard**:
+
+```csv
+company_name
+Groww
+Razorpay
+PhonePe
+```
+
+Discovery reads this file **fresh on every run**.
+
+### Phase 2 — Contact discovery
+
+On **Discover Contacts**, Apollo searches each company for:
+
+- Technical Recruiter · Recruiter · Talent Acquisition
+- Engineering Manager · Software Engineering Manager · Backend Engineering Manager
+- Hiring Manager · Team Lead · Director Engineering
+
+**Retrieved:** name, designation, LinkedIn, company, email (if Apollo provides it).
+
+Contacts **without email** are still saved — add emails manually in Review.
+
+### Phase 3 — Manual review (required)
+
+On **Review Contacts**:
+
+- Remove incorrect or duplicate entries
+- Add missing email addresses
+- Add notes (e.g. *"Strong backend hiring manager"*)
+- Set `send_email` and `special_mail`
+
+No emails are sent automatically.
+
+### Phase 4 — Contact selection
+
+| Column | Values | Meaning |
+| ------ | ------ | ------- |
+| `send_email` | `YES` / `NO` | Eligible for automated send |
+| `special_mail` | `YES` / `NO` | `YES` = handle manually, skip automation |
+
+**Example — recruiter (automate):**
+
+```csv
+send_email,special_mail
+YES,NO
+```
+
+**Example — director (manual):**
+
+```csv
+send_email,special_mail
+YES,YES
+```
+
+### Phase 5 — Preview & send
+
+On **Send Emails**:
+
+1. Preview generated email (subject + body)
+2. Confirm and send eligible contacts
+3. Status updates in `contacts.csv`
+
+**Send criteria:**
+
+```
+send_email = YES
+special_mail = NO
+status = PENDING
+valid email address
+```
+
+---
+
+## CSV Schemas
+
+### `companies.csv`
+
+```csv
+company_name
+Groww
+Razorpay
+```
+
+### `contacts.csv`
+
+```csv
+company_name,person_name,designation,linkedin_url,email,contact_type,send_email,special_mail,status,notes
+Groww,John Doe,Engineering Manager,https://linkedin.com/in/johndoe,john.doe@groww.in,Manager,YES,NO,PENDING,Strong backend hiring manager
+```
+
+| Column | Description |
+| ------ | ----------- |
+| `company_name` | Target company |
+| `person_name` | Full name |
+| `designation` | Job title from Apollo or manual entry |
+| `linkedin_url` | LinkedIn profile URL |
+| `email` | Work email (blank if unknown — fill in Review) |
+| `contact_type` | e.g. Recruiter, Manager, Director |
+| `send_email` | `YES` or `NO` |
+| `special_mail` | `YES` or `NO` |
+| `status` | `PENDING` · `SENT` · `FAILED` · `SKIPPED` |
+| `notes` | Free-text review notes |
+
+---
+
+## Email Template
+
+Single reusable template at `templates/default-email.txt`.
+
+**Variables:**
+
+| Variable | Source |
+| -------- | ------ |
+| `{{name}}` | Contact first name |
+| `{{company}}` | Company name |
+| `{{designation}}` | Job title |
+| `{{linkedin}}` | Your LinkedIn URL (`.env`) |
+| `{{github}}` | Your GitHub URL (`.env`) |
+
+Edit the template file directly — no AI generation.
+
+---
+
+## Application Pages
+
+| Page | Route | Purpose |
+| ---- | ----- | ------- |
+| Dashboard | `/` | Upload CSVs, view stats (companies, contacts, pending, sent) |
+| Discover Contacts | `/recruiters` | Load `companies.csv`, run Apollo search, export `contacts.csv` |
+| Review Contacts | `/review` | Edit table, notes, send flags; save CSV |
+| Send Emails | `/send` | Preview, send via Gmail, update status |
+
+---
+
+## Project Structure
+
+```
+apollo_leads/
+├── app/
+│   ├── page.tsx                 # Dashboard
+│   ├── recruiters/page.tsx      # Discover Contacts
+│   ├── review/page.tsx          # Review Contacts
+│   ├── send/page.tsx            # Send Emails
+│   └── api/
+│       ├── apollo/search/       # Apollo discovery
+│       ├── companies/           # companies.csv CRUD
+│       ├── contacts/            # contacts.csv CRUD
+│       ├── contacts/export/     # Download contacts.csv
+│       ├── email/preview/       # Template preview
+│       ├── email/send/          # Gmail send
+│       └── files/               # Upload + stats
+├── components/
+├── data/                        # CSV storage (gitignored)
+├── lib/
+│   ├── apollo.ts
+│   ├── csv.ts
+│   ├── gmail.ts
+│   ├── template.ts
+│   └── validation.ts
+├── templates/
+│   └── default-email.txt
+├── .env.example
+└── package.json
+```
+
+---
+
+## Apollo API Setup
+
+1. Log in to [Apollo](https://app.apollo.io) → **Settings** → **Integrations** → **API Keys**
+2. Create a key with **Set as master key** enabled
+3. Add to `.env` as `APOLLO_API_KEY`
+
+**Note:** Apollo People Search finds contacts but may not return emails on all plans. Email enrichment requires `people/match` access. Contacts without email can be completed manually in Review.
+
+---
+
+## Gmail Setup
+
+1. Enable **2-Step Verification** on your Google account
+2. Create an [App Password](https://myaccount.google.com/apppasswords)
+3. Add credentials to `.env`:
+
+```env
+GMAIL_EMAIL=you@gmail.com
+GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
+```
+
+Verify connection on the **Send Emails** page (Gmail status badge).
+
+---
+
+## Out of Scope (V1)
+
+The following are **not** included by design:
+
+- Hunter.io / email verification
+- LinkedIn enrichment
+- Multiple templates
+- AI personalization
+- Follow-up automation
+- Analytics / CRM
+- Multi-user support
+- Cloud deployment
+
+---
+
+## Scripts
+
+| Command | Description |
+| ------- | ----------- |
+| `npm run dev` | Start development server |
+| `npm run build` | Production build |
+| `npm start` | Run production server |
+| `npm run lint` | ESLint |
+
+---
+
+## License
+
+Private personal project. Not licensed for commercial redistribution.
