@@ -14,6 +14,7 @@ export interface TemplateContext {
   name: string;
   company: string;
   designation: string;
+  matched_role: string;
   linkedin: string;
   github: string;
 }
@@ -42,6 +43,7 @@ export function renderTemplate(
     .replace(/\{\{name\}\}/g, context.name || "there")
     .replace(/\{\{company\}\}/g, context.company || "your company")
     .replace(/\{\{designation\}\}/g, context.designation || "")
+    .replace(/\{\{matched_role\}\}/g, context.matched_role || "Software Engineer")
     .replace(/\{\{linkedin\}\}/g, context.linkedin || "")
     .replace(/\{\{github\}\}/g, context.github || "");
 }
@@ -55,6 +57,7 @@ export function buildEmailFromContact(
     name: contact.person_name.split(" ")[0] || contact.person_name,
     company: contact.company_name,
     designation: contact.designation,
+    matched_role: contact.matched_job_title || "Software Engineer",
     linkedin: profileLinks.linkedin,
     github: profileLinks.github,
   };

@@ -27,8 +27,8 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans`}>
         <Sidebar />
-        <main className="ml-64 min-h-screen">
-          <div className="max-w-7xl mx-auto px-8 py-10">{children}</div>
+        <main className="ml-60 min-h-screen">
+          <div className="max-w-7xl mx-auto px-8 py-8">{children}</div>
         </main>
       </body>
     </html>

@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { PageHeader } from "@/components/PageHeader";
+import { StatCard } from "@/components/StatCard";
 import type { Contact } from "@/lib/csv";
+import { emailQualityLabel, type EmailQuality } from "@/lib/email-quality";
+import { sortContactsByScore } from "@/lib/scoring";
 
 interface ContactRow extends Contact {
   rowId: string;
@@ -17,6 +20,11 @@ const EMPTY_CONTACT: Contact = {
   linkedin_url: "",
   email: "",
   contact_type: "Manager",
+  source: "",
+  contact_score: "0",
+  matching_role_found: "NO",
+  matched_job_title: "",
+  email_quality: "missing",
   send_email: "NO",
   special_mail: "NO",
   status: "PENDING",
@@ -55,7 +63,7 @@ export default function ReviewPage() {
         return;
       }
       rowIdRef.current = 0;
-      setRows(toRows(data.contacts ?? [], rowIdRef));
+      setRows(toRows(sortContactsByScore(data.contacts ?? []), rowIdRef));
       setDirty(false);
     } catch {
       setMessage({ type: "error", text: "Failed to load contacts" });
@@ -102,7 +110,15 @@ export default function ReviewPage() {
   function dedupeContacts() {
     const seen = new Map<string, ContactRow>();
     for (const row of rows) {
-      const key = `${row.email.toLowerCase()}|${row.person_name.toLowerCase()}|${row.company_name.toLowerCase()}`;
+      const email = row.email.toLowerCase().trim();
+      const name = row.person_name.toLowerCase().trim();
+      const company = row.company_name.toLowerCase().trim();
+      const linkedin = row.linkedin_url.toLowerCase().trim();
+      const key = email
+        ? `${company}|${email}`
+        : linkedin
+          ? `${company}|${name}|${linkedin}`
+          : `${company}|${name}`;
       if (!row.email && !row.person_name) continue;
       seen.set(key, row);
     }
@@ -161,15 +177,18 @@ export default function ReviewPage() {
     );
   });
 
-  const sendYes = rows.filter((r) => r.send_email === "YES").length;
-  const specialYes = rows.filter((r) => r.special_mail === "YES").length;
+  const readyToSend = rows.filter(
+    (r) => r.send_email === "YES" && r.special_mail === "NO" && r.status === "PENDING" && r.email.trim().length > 0
+  ).length;
+  const missingEmail = rows.filter((r) => !r.email.trim()).length;
+  const alreadySent = rows.filter((r) => r.status === "SENT").length;
   const failedCount = rows.filter((r) => r.status === "FAILED").length;
 
   return (
     <div>
       <PageHeader
         title="Review Contacts"
-        description="Mandatory manual review. Remove incorrect contacts, add emails, write notes, and mark send preferences before any outreach."
+        description="Mandatory manual pass before any outreach. Remove incorrect contacts, add missing emails, and mark send preferences."
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={fetchContacts} disabled={loading || dirty}>
@@ -195,28 +214,60 @@ export default function ReviewPage() {
       )}
 
       {dirty && (
-        <div className="mb-6 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400 text-sm">
-          You have unsaved changes. Click Save CSV to persist to contacts.csv.
+        <div className="mb-6 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400 text-sm flex items-center justify-between">
+          <span>Unsaved changes — click Save CSV to persist.</span>
+          <Button size="sm" onClick={saveContacts} loading={saving}>Save CSV</Button>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Total</p>
-          <p className="text-2xl font-semibold text-white">{rows.length}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Send Email = YES</p>
-          <p className="text-2xl font-semibold text-emerald-400">{sendYes}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Special Mail = YES</p>
-          <p className="text-2xl font-semibold text-amber-400">{specialYes}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Failed (retryable)</p>
-          <p className="text-2xl font-semibold text-red-400">{failedCount}</p>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard
+          label="Total"
+          value={rows.length}
+          sub="contacts loaded"
+          iconClass="bg-surface-overlay text-gray-400"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Ready to Send"
+          value={readyToSend}
+          sub="approved + has email"
+          iconClass="bg-accent/15 text-accent"
+          valueClass="text-accent"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Missing Email"
+          value={missingEmail}
+          sub="need email address"
+          iconClass="bg-amber-500/15 text-amber-400"
+          valueClass={missingEmail > 0 ? "text-amber-400" : "text-white"}
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Sent"
+          value={alreadySent}
+          sub={failedCount > 0 ? `${failedCount} failed` : "all clean"}
+          iconClass="bg-sky-500/15 text-sky-400"
+          valueClass="text-sky-400"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          }
+        />
       </div>
 
       <Card className="mb-6">
@@ -258,12 +309,16 @@ export default function ReviewPage() {
             <table>
               <thead>
                 <tr>
+                  <th>Score</th>
                   <th>Company</th>
                   <th>Name</th>
                   <th>Designation</th>
                   <th>Email</th>
+                  <th>Quality</th>
                   <th>LinkedIn</th>
                   <th>Type</th>
+                  <th>Source</th>
+                  <th>Hiring</th>
                   <th>Send</th>
                   <th>Special</th>
                   <th>Status</th>
@@ -274,6 +329,7 @@ export default function ReviewPage() {
               <tbody>
                 {filtered.map((row) => (
                   <tr key={row.rowId}>
+                    <td className="font-semibold text-emerald-400">{row.contact_score || "0"}</td>
                     <td>
                       <input
                         value={row.company_name}
@@ -302,6 +358,9 @@ export default function ReviewPage() {
                         className="w-44 bg-transparent border-0 p-0 focus:ring-0 font-mono text-xs"
                       />
                     </td>
+                    <td className="text-xs text-gray-400">
+                      {emailQualityLabel((row.email_quality || "missing") as EmailQuality)}
+                    </td>
                     <td>
                       <input
                         value={row.linkedin_url}
@@ -315,6 +374,16 @@ export default function ReviewPage() {
                         onChange={(e) => updateRow(row.rowId, "contact_type", e.target.value)}
                         className="w-28 bg-transparent border-0 p-0 focus:ring-0"
                       />
+                    </td>
+                    <td className="text-xs text-gray-500">{row.source || "—"}</td>
+                    <td className="text-xs">
+                      {row.matching_role_found === "YES" ? (
+                        <span className="text-emerald-400" title={row.matched_job_title}>
+                          YES
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">NO</span>
+                      )}
                     </td>
                     <td>
                       <select

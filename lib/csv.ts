@@ -10,6 +10,11 @@ export interface Contact {
   linkedin_url: string;
   email: string;
   contact_type: string;
+  source: string;
+  contact_score: string;
+  matching_role_found: string;
+  matched_job_title: string;
+  email_quality: string;
   send_email: string;
   special_mail: string;
   status: string;
@@ -18,22 +23,28 @@ export interface Contact {
 
 export interface Company {
   company_name: string;
+  domain: string;
 }
 
 export const CONTACT_COLUMNS: (keyof Contact)[] = [
   "company_name",
   "person_name",
   "designation",
-  "linkedin_url",
   "email",
+  "linkedin_url",
   "contact_type",
+  "source",
+  "contact_score",
+  "matching_role_found",
+  "matched_job_title",
+  "email_quality",
   "send_email",
   "special_mail",
   "status",
   "notes",
 ];
 
-export const COMPANY_COLUMNS: (keyof Company)[] = ["company_name"];
+export const COMPANY_COLUMNS: (keyof Company)[] = ["company_name", "domain"];
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const COMPANIES_PATH = path.join(DATA_DIR, "companies.csv");
@@ -51,17 +62,50 @@ async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export function contactKey(contact: Contact): string {
-  return `${contact.email.toLowerCase()}|${contact.person_name.toLowerCase()}|${contact.company_name.toLowerCase()}`;
+  const company = contact.company_name.toLowerCase().trim();
+  const email = contact.email.toLowerCase().trim();
+  const name = contact.person_name.toLowerCase().trim();
+  const linkedin = contact.linkedin_url.toLowerCase().trim();
+
+  if (email) return `${company}|${email}`;
+  if (linkedin) return `${company}|${name}|${linkedin}`;
+  return `${company}|${name}`;
+}
+
+function mergeSources(a: string, b: string): string {
+  const parts = new Set(
+    `${a}+${b}`
+      .split("+")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+  return Array.from(parts).join("+");
 }
 
 function mergeContact(existing: Contact, incoming: Contact): Contact {
+  const email = incoming.email || existing.email;
+  const emailQuality =
+    incoming.email && incoming.email !== existing.email
+      ? incoming.email_quality
+      : existing.email_quality || incoming.email_quality;
+
   return {
     company_name: incoming.company_name || existing.company_name,
     person_name: incoming.person_name || existing.person_name,
     designation: incoming.designation || existing.designation,
     linkedin_url: incoming.linkedin_url || existing.linkedin_url,
-    email: incoming.email || existing.email,
+    email,
     contact_type: incoming.contact_type || existing.contact_type,
+    source: mergeSources(existing.source, incoming.source),
+    contact_score: String(
+      Math.max(Number(existing.contact_score || 0), Number(incoming.contact_score || 0))
+    ),
+    matching_role_found:
+      existing.matching_role_found === "YES" || incoming.matching_role_found === "YES"
+        ? "YES"
+        : "NO",
+    matched_job_title: incoming.matched_job_title || existing.matched_job_title,
+    email_quality: emailQuality,
     send_email: existing.send_email,
     special_mail: existing.special_mail,
     status: existing.status,
@@ -112,6 +156,11 @@ function normalizeContact(row: Partial<Contact>): Contact {
     linkedin_url: (row.linkedin_url ?? "").trim(),
     email: (row.email ?? "").trim(),
     contact_type: (row.contact_type ?? "").trim(),
+    source: (row.source ?? "").trim(),
+    contact_score: (row.contact_score ?? "0").trim(),
+    matching_role_found: normalizeYesNo(row.matching_role_found, "NO"),
+    matched_job_title: (row.matched_job_title ?? "").trim(),
+    email_quality: (row.email_quality ?? "missing").trim(),
     send_email: normalizeYesNo(row.send_email, "NO"),
     special_mail: normalizeYesNo(row.special_mail, "NO"),
     status: normalizeStatus(row.status),
@@ -158,7 +207,8 @@ function parseSimpleCompanyList(content: string): Company[] {
 
   return lines.slice(startIndex).map((line) => {
     const value = line.split(",")[0]?.trim() ?? line.trim();
-    return { company_name: value };
+    const domain = line.split(",")[1]?.trim() ?? "";
+    return { company_name: value, domain };
   });
 }
 
@@ -184,15 +234,18 @@ export async function readCompanies(): Promise<Company[]> {
   if (!(await fileExists(COMPANIES_PATH))) return [];
   const content = await fs.readFile(COMPANIES_PATH, "utf-8");
 
-  let rows: { company_name?: string }[];
+  let rows: { company_name?: string; domain?: string }[];
   try {
-    rows = parseCsv<{ company_name?: string }>(content);
+    rows = parseCsv<{ company_name?: string; domain?: string }>(content);
   } catch {
     rows = parseSimpleCompanyList(content);
   }
 
   const companies = rows
-    .map((r) => ({ company_name: (r.company_name ?? "").trim() }))
+    .map((r) => ({
+      company_name: (r.company_name ?? "").trim(),
+      domain: (r.domain ?? "").trim(),
+    }))
     .filter((r) => r.company_name.length > 0);
 
   if (companies.length === 0) {
@@ -208,7 +261,10 @@ export async function writeCompanies(companies: Company[]): Promise<void> {
     const unique = Array.from(
       new Map(
         companies
-          .map((c) => ({ company_name: c.company_name.trim() }))
+          .map((c) => ({
+            company_name: c.company_name.trim(),
+            domain: (c.domain ?? "").trim(),
+          }))
           .filter((c) => c.company_name.length > 0)
           .map((c) => [c.company_name.toLowerCase(), c])
       ).values()
@@ -309,9 +365,12 @@ export async function getFileStats() {
 
 export function parseCompaniesCsv(content: string): Company[] {
   try {
-    const rows = parseCsv<{ company_name?: string }>(content);
+    const rows = parseCsv<{ company_name?: string; domain?: string }>(content);
     const companies = rows
-      .map((r) => ({ company_name: (r.company_name ?? "").trim() }))
+      .map((r) => ({
+        company_name: (r.company_name ?? "").trim(),
+        domain: (r.domain ?? "").trim(),
+      }))
       .filter((r) => r.company_name.length > 0);
     if (companies.length > 0) return companies;
   } catch {

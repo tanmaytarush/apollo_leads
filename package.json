@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:apollo": "node scripts/test-apollo-email.mjs",
+    "fetch:person": "node scripts/fetch-person.mjs"
   },
   "dependencies": {
     "next": "^15.3.3",

@@ -1,10 +1,10 @@
-Subject: Software Engineer Opportunities at {{company}}
+Subject: {{matched_role}} role at {{company}}
 
 Hi {{name}},
 
 I hope you're doing well.
 
-I am reaching out regarding Software Engineer opportunities at {{company}}.
+I noticed {{company}} is hiring for a {{matched_role}} role and wanted to reach out.
 
 I have experience building backend systems, AI-powered applications, and scalable software using Python, FastAPI, AWS, and modern AI frameworks.
 

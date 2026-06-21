@@ -5,6 +5,7 @@ import { Badge, statusBadge } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { PageHeader } from "@/components/PageHeader";
+import { StatCard } from "@/components/StatCard";
 import type { Contact } from "@/lib/csv";
 import { isValidEmail } from "@/lib/validation";
 
@@ -32,6 +33,7 @@ export default function SendPage() {
   const [gmailOk, setGmailOk] = useState<boolean | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [sendResults, setSendResults] = useState<SendResult[]>([]);
+  const [resetting, setResetting] = useState<number | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -48,7 +50,10 @@ export default function SendPage() {
         setMessage({ type: "error", text: contactsData.error || "Failed to load contacts" });
         setContacts([]);
       } else {
-        setContacts(contactsData.contacts ?? []);
+        const sorted = [...(contactsData.contacts ?? [])].sort(
+          (a, b) => Number(b.contact_score || 0) - Number(a.contact_score || 0)
+        );
+        setContacts(sorted);
       }
 
       setGmailOk(gmailData.gmail?.ok ?? false);
@@ -155,15 +160,40 @@ export default function SendPage() {
     }
   }
 
+  async function handleResetStatus(index: number) {
+    setResetting(index);
+    try {
+      const updated = contacts.map((c, i) =>
+        i === index ? { ...c, status: "PENDING" } : c
+      );
+      const res = await fetch("/api/contacts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contacts: updated }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setMessage({ type: "error", text: data.error || "Reset failed" });
+        return;
+      }
+      await fetchData();
+    } catch {
+      setMessage({ type: "error", text: "Reset failed" });
+    } finally {
+      setResetting(null);
+    }
+  }
+
   const sent = contacts.filter((c) => c.status === "SENT").length;
   const failed = contacts.filter((c) => c.status === "FAILED").length;
-  const pending = contacts.filter((c) => c.status === "PENDING").length;
+  const attempted = sent + failed;
+  const successRate = attempted > 0 ? `${Math.round((sent / attempted) * 100)}%` : "—";
 
   return (
     <div>
       <PageHeader
         title="Send Emails"
-        description="Preview and send outreach emails to marked contacts via Gmail SMTP. Only contacts with send_email=YES, special_mail=NO, and status=PENDING are eligible."
+        description="Preview and send outreach to approved contacts via Gmail SMTP. Only send_email=YES, special_mail=NO, status=PENDING contacts are eligible."
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={fetchData} disabled={loading}>
@@ -194,31 +224,55 @@ export default function SendPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Eligible to send</p>
-          <p className="text-2xl font-semibold text-emerald-400">{eligible.length}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Pending</p>
-          <p className="text-2xl font-semibold text-amber-400">{pending}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Sent</p>
-          <p className="text-2xl font-semibold text-white">{sent}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-gray-500">Gmail</p>
-          <div className="mt-2">
-            {gmailOk === null ? (
-              <Badge variant="neutral">Checking…</Badge>
-            ) : gmailOk ? (
-              <Badge variant="success">Ready</Badge>
-            ) : (
-              <Badge variant="error">Not configured</Badge>
-            )}
-          </div>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard
+          label="Eligible"
+          value={eligible.length}
+          sub="ready to send"
+          iconClass="bg-accent/15 text-accent"
+          valueClass="text-accent"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Sent"
+          value={sent}
+          sub="delivered"
+          iconClass="bg-sky-500/15 text-sky-400"
+          valueClass="text-sky-400"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Success Rate"
+          value={successRate}
+          sub={attempted > 0 ? `${attempted} attempted` : "no attempts yet"}
+          iconClass="bg-purple-500/15 text-purple-400"
+          valueClass="text-white"
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          }
+        />
+        <StatCard
+          label="Gmail"
+          value={gmailOk === null ? "…" : gmailOk ? "Ready" : "Error"}
+          sub={gmailOk ? "SMTP connected" : "Check .env"}
+          iconClass={gmailOk ? "bg-accent/15 text-accent" : "bg-red-500/15 text-red-400"}
+          valueClass={gmailOk ? "text-accent text-xl" : "text-red-400 text-xl"}
+          icon={
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          }
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -279,7 +333,7 @@ export default function SendPage() {
                           <td className="font-medium">{contact.person_name}</td>
                           <td className="font-mono text-xs">{contact.email || "—"}</td>
                           <td>{statusBadge(contact.status)}</td>
-                          <td>
+                          <td className="flex items-center gap-2">
                             {contact.email && (
                               <Button
                                 variant="ghost"
@@ -288,6 +342,16 @@ export default function SendPage() {
                                 onClick={() => handlePreview(index)}
                               >
                                 Preview
+                              </Button>
+                            )}
+                            {contact.status === "FAILED" && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                loading={resetting === index}
+                                onClick={() => handleResetStatus(index)}
+                              >
+                                Retry
                               </Button>
                             )}
                           </td>

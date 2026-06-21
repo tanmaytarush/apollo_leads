@@ -33,11 +33,19 @@
   }
 
   td {
-    @apply px-4 py-3 border-b border-surface-border/50 text-gray-200;
+    @apply px-4 py-2.5 border-b border-surface-border/50 text-gray-200;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tr:nth-child(even) td {
+    @apply bg-surface-raised/30;
   }
 
   tr:hover td {
-    @apply bg-surface-overlay/30;
+    @apply bg-accent/5;
   }
 }
 
