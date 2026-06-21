@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Badge } from "@/components/Badge";
+import { CsvUploadCard } from "@/components/CsvUploadCard";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { PageHeader } from "@/components/PageHeader";
 
 interface FileStats {
-  companies: { exists: boolean; count: number; modified: string | null; path: string };
-  contacts: { exists: boolean; count: number; modified: string | null; path: string };
+  companies: { exists: boolean; count: number; modified: string | null; source: string };
+  contacts: { exists: boolean; count: number; modified: string | null; source: string };
   outreach: { emailsPending: number; emailsSent: number };
 }
 
@@ -17,7 +17,7 @@ const workflowSteps = [
   {
     step: 1,
     title: "Upload Companies",
-    description: "Import target companies via companies.csv. One company per row: name, domain.",
+    description: "Drop or select a CSV with company name and domain.",
     href: "/",
     done: (s: FileStats | null) => (s?.companies.count ?? 0) > 0,
   },
@@ -49,20 +49,18 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const companiesInputRef = useRef<HTMLInputElement>(null);
-  const contactsInputRef = useRef<HTMLInputElement>(null);
 
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch("/api/files");
       const data = await res.json();
       if (!res.ok) {
-        setMessage({ type: "error", text: data.error || "Failed to load file stats" });
+        setMessage({ type: "error", text: data.error || "Failed to load stats" });
         return;
       }
       setStats(data);
     } catch {
-      setMessage({ type: "error", text: "Failed to load file stats" });
+      setMessage({ type: "error", text: "Failed to load stats" });
     } finally {
       setLoading(false);
     }
@@ -98,22 +96,17 @@ export default function HomePage() {
     }
   }
 
-  function formatDate(iso: string | null) {
-    if (!iso) return "—";
-    return new Date(iso).toLocaleString();
-  }
-
   const pipelineStages = [
     {
       label: "Companies",
-      sub: "in scope",
+      sub: "uploaded",
       value: stats?.companies.count ?? 0,
       valueClass: "text-white",
       bgClass: "bg-surface-overlay/50",
     },
     {
       label: "Contacts",
-      sub: "found",
+      sub: "in pipeline",
       value: stats?.contacts.count ?? 0,
       valueClass: "text-sky-400",
       bgClass: "bg-sky-500/10",
@@ -138,7 +131,7 @@ export default function HomePage() {
     <div>
       <PageHeader
         title="Dashboard"
-        description="Find the right people, review manually, send high-quality outreach. Thoughtful job search automation — not mass emailing."
+        description="Upload your target companies and contacts as CSV — no local folders required. Review manually, then send outreach from your Gmail."
         actions={
           <Button variant="secondary" size="sm" onClick={fetchStats} disabled={loading}>
             Refresh
@@ -158,11 +151,10 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Pipeline funnel */}
       <Card className="mb-8">
         <div className="p-5 pb-1 border-b border-surface-border/50 flex items-center justify-between">
           <h2 className="font-semibold text-white text-sm">Outreach Pipeline</h2>
-          <span className="text-[11px] text-gray-600 font-mono">Companies → Contacts → Ready → Sent</span>
+          <span className="text-[11px] text-gray-600 font-mono">Upload → Discover → Review → Send</span>
         </div>
         <div className="p-5 flex items-stretch gap-3">
           {pipelineStages.flatMap((stage, i) => [
@@ -192,92 +184,33 @@ export default function HomePage() {
         </div>
       </Card>
 
-      {/* CSV file cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        <Card className="p-6">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-surface-overlay flex items-center justify-center">
-                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                </div>
-                <h3 className="font-medium text-white text-sm">companies.csv</h3>
-              </div>
-              <p className="text-xs text-gray-500 font-mono">{stats?.companies.path}</p>
-            </div>
-            <Badge variant={stats?.companies.count ? "success" : "neutral"}>
-              {loading ? "…" : `${stats?.companies.count ?? 0} rows`}
-            </Badge>
-          </div>
-          <p className="text-xs text-gray-600 mb-4">
-            Modified: {formatDate(stats?.companies.modified ?? null)}
-          </p>
-          <input
-            ref={companiesInputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUpload("companies", file);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={uploading === "companies"}
-            onClick={() => companiesInputRef.current?.click()}
-          >
-            Upload companies.csv
-          </Button>
-        </Card>
-
-        <Card className="p-6">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-surface-overlay flex items-center justify-center">
-                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <h3 className="font-medium text-white text-sm">contacts.csv</h3>
-              </div>
-              <p className="text-xs text-gray-500 font-mono">{stats?.contacts.path}</p>
-            </div>
-            <Badge variant={stats?.contacts.count ? "success" : "neutral"}>
-              {loading ? "…" : `${stats?.contacts.count ?? 0} rows`}
-            </Badge>
-          </div>
-          <p className="text-xs text-gray-600 mb-4">
-            Modified: {formatDate(stats?.contacts.modified ?? null)}
-          </p>
-          <input
-            ref={contactsInputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUpload("contacts", file);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={uploading === "contacts"}
-            onClick={() => contactsInputRef.current?.click()}
-          >
-            Upload contacts.csv
-          </Button>
-        </Card>
+        <CsvUploadCard
+          title="Companies"
+          description="Target employers for outreach. Include domain for best Apollo results."
+          sampleHint="company_name,domain — e.g. Groww,groww.in"
+          rowCount={stats?.companies.count ?? 0}
+          lastModified={stats?.companies.modified ?? null}
+          loading={loading}
+          uploading={uploading === "companies"}
+          onUpload={(file) => handleUpload("companies", file)}
+          downloadHref="/api/companies/export"
+          downloadFilename="companies.csv"
+        />
+        <CsvUploadCard
+          title="Contacts"
+          description="Recruiters and hiring managers. Upload from Apollo export or add via Discover."
+          sampleHint="person_name,email,company_name,designation,linkedin_url,…"
+          rowCount={stats?.contacts.count ?? 0}
+          lastModified={stats?.contacts.modified ?? null}
+          loading={loading}
+          uploading={uploading === "contacts"}
+          onUpload={(file) => handleUpload("contacts", file)}
+          downloadHref="/api/contacts/export"
+          downloadFilename="contacts.csv"
+        />
       </div>
 
-      {/* Workflow steps */}
       <Card className="mb-8">
         <div className="p-5 border-b border-surface-border/50">
           <h2 className="font-semibold text-white text-sm">Workflow</h2>
@@ -327,7 +260,7 @@ export default function HomePage() {
 
 APOLLO_API_KEY=your_apollo_key
 GMAIL_EMAIL=your@gmail.com
-GMAIL_APP_PASSWORD=your_app_password   # myaccount.google.com/apppasswords
+GMAIL_APP_PASSWORD=your_app_password
 LINKEDIN_URL=https://linkedin.com/in/you
 GITHUB_URL=https://github.com/you
 

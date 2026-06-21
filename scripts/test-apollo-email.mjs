@@ -171,7 +171,7 @@ async function main() {
   }
 
   if (samplePerson?.id) {
-    await probeStep("People Enrichment (people/match)", () => {
+    await probeStep("People Enrichment (people/match by id)", () => {
       const params = new URLSearchParams({
         id: samplePerson.id,
         reveal_personal_emails: "true",
@@ -187,8 +187,21 @@ async function main() {
       });
     });
   } else {
-    console.log("✗ People Enrichment (people/match): skipped — no person id from api_search");
+    console.log("✗ People Enrichment (people/match by id): skipped — no person id from api_search");
   }
+
+  const peopleMatch = await probeStep("People Match (people/match by org)", () =>
+    apolloFetch(apiKey, "/people/match", {
+      method: "POST",
+      body: JSON.stringify({
+        organization_name: company,
+        domain,
+        title: "recruiter",
+        reveal_personal_emails: false,
+        reveal_phone_number: false,
+      }),
+    })
+  );
 
   await probeStep("contacts/search (saved CRM contacts only)", () =>
     apolloFetch(apiKey, "/contacts/search", {
@@ -204,16 +217,18 @@ async function main() {
   }
 
   printSection("Verdict");
-  const errors = [orgSearch, orgEnrich, peopleSearch].filter((r) => !r.ok).map((r) => r.error);
-  const freePlan = errors.some((e) => String(e).includes("free plan") || String(e).includes("API_INACCESSIBLE"));
+  const errors = [orgSearch, orgEnrich, peopleSearch, peopleMatch].filter((r) => !r.ok).map((r) => r.error);
+  const hardBlocked = errors.some((e) => String(e).includes("free plan") || String(e).includes("API_INACCESSIBLE"));
 
-  if (peopleSearch.ok) {
-    console.log("People API Search works → Run Discovery in the app.");
-    console.log("Emails come from people/match (uses credits per Apollo docs).");
-  } else if (freePlan) {
-    console.log("Apollo FREE PLAN blocks API search endpoints (403 API_INACCESSIBLE).");
-    console.log("UI credits ≠ API access. Upgrade plan or use Apollo UI manually, then import contacts.csv.");
-    console.log("Docs: https://docs.apollo.io/reference/people-api-search");
+  if (peopleSearch.ok || peopleMatch.ok) {
+    console.log("People discovery works via API → Run People Discovery in the app.");
+    console.log("Free plan: discovery is available with monthly credit caps.");
+    console.log("  · Email reveals: up to ~10,000/mo (corporate domains)");
+    console.log("  · Mobile reveals: 5/mo · Export credits: 10/mo");
+    console.log("Emails come from people/match (uses email credits per Apollo docs).");
+  } else if (hardBlocked) {
+    console.log("People API returned 403 — verify master API key scope in Apollo settings.");
+    console.log("Fallback: upload contacts CSV on Dashboard or add manually on Review.");
   } else if (errors.some((e) => String(e).includes("CONNECT_TIMEOUT") || String(e).includes("fetch failed"))) {
     console.log("Network timeout reaching api.apollo.io — check VPN/firewall.");
   } else {

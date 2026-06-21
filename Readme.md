@@ -1,123 +1,153 @@
 # SDE Job Outreach Automation
 
-A lightweight, **local-first** web app for Software Engineering job search outreach. Upload a list of target companies, discover recruiters and hiring managers via the **Apollo API**, review every contact manually, and send thoughtful template-based emails from your personal **Gmail** account.
+A **browser-first** web app for Software Engineering job search outreach. Upload target companies as CSV, discover a hiring manager or technical recruiter per company via **Apollo API** (with **Hunter.io** fallback), review every contact manually, and send personalised template emails from your **Gmail** account.
 
-> **Personal use only.** Not built for mass emailing, CRM workflows, or multi-user deployment.
+> **Personal use only.** Single user, no auth, no database. Human review is mandatory before any email is sent.
 
 ---
 
 ## Table of Contents
 
-1. [Philosophy](#philosophy)
-2. [What This Tool Does](#what-this-tool-does)
-3. [Features](#features)
-4. [Tech Stack](#tech-stack)
-5. [Prerequisites](#prerequisites)
-6. [Installation](#installation)
-7. [Environment Variables](#environment-variables)
-8. [End-to-End Workflow](#end-to-end-workflow)
+1. [Architecture](#architecture)
+2. [Complete Flow](#complete-flow)
+3. [Tech Stack](#tech-stack)
+4. [Prerequisites](#prerequisites)
+5. [Installation](#installation)
+6. [Environment Variables](#environment-variables)
+7. [Quick Start](#quick-start)
+8. [Pages & API Routes](#pages--api-routes)
 9. [CSV Schemas](#csv-schemas)
-10. [Apollo API Reference](#apollo-api-reference)
-11. [Discovery Pipeline](#discovery-pipeline)
-12. [Contact Scoring](#contact-scoring)
-13. [Email Template](#email-template)
-14. [Application Pages & API Routes](#application-pages--api-routes)
-15. [CLI Scripts](#cli-scripts)
+10. [Discovery Pipeline](#discovery-pipeline)
+11. [Contact Scoring](#contact-scoring)
+12. [Apollo API Reference](#apollo-api-reference)
+13. [Hunter.io API Reference](#hunterio-api-reference)
+14. [Apollo Free Plan — Reality](#apollo-free-plan--reality)
+15. [Email Template](#email-template)
 16. [Gmail Setup](#gmail-setup)
-17. [Apollo Account Setup](#apollo-account-setup)
-18. [Free Plan vs Paid Plan](#free-plan-vs-paid-plan)
-19. [Troubleshooting](#troubleshooting)
-20. [Project Structure](#project-structure)
-21. [Scripts Reference](#scripts-reference)
-22. [Out of Scope](#out-of-scope)
-23. [License](#license)
+17. [Project Structure](#project-structure)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Philosophy
-
-The goal is **not** to blast hundreds of emails.
-
-The goal is to:
-
-- Find the **right people** at target companies (recruiters, EMs, hiring managers)
-- **Review every contact** before anything is sent
-- Send **high-quality, template-based** outreach referencing real open roles
-- **Track progress** in simple CSV files on your machine
-
-Simplicity over automation. Human judgment at every step.
-
----
-
-## What This Tool Does
+## Architecture
 
 ```
-companies.csv  →  Apollo API (org enrich, job postings, people match)  →  contacts.csv
-                                                                              ↓
-                                                                    Manual review (required)
-                                                                              ↓
-                                                         Gmail SMTP (Nodemailer) → SENT status
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          BROWSER (Next.js App Router)                       │
+│                                                                             │
+│  Dashboard /      Discover /recruiters    Review /review     Send /send     │
+│  ──────────       ────────────────────    ─────────────      ─────────      │
+│  Upload CSVs      Company Intel           Edit contacts      Preview email  │
+│  Pipeline stats   Run Discovery           Set send flags     Gmail send     │
+│  Download CSVs    Progress + credits      Save to CSV        Status track   │
+└───────────────────────────┬─────────────────────────────────────────────────┘
+                            │ API Routes (Next.js App Router)
+            ┌───────────────┼───────────────────────────────┐
+            │               │                               │
+     /api/apollo/     /api/email/            /api/files, /api/companies
+     search           send                   /api/contacts
+     company-intel    preview
+            │               │
+            ▼               ▼
+   ┌─────────────────┐  ┌──────────────────────────────────┐
+   │   Discovery     │  │  Gmail SMTP (Nodemailer)          │
+   │   Pipeline      │  │  tanmay.dikshit2112@gmail.com     │
+   │   lib/apollo.ts │  │  App Password auth                │
+   └────────┬────────┘  └──────────────────────────────────┘
+            │
+     ┌──────┴──────────────────────────────────┐
+     │                                         │
+     ▼                                         ▼
+┌──────────────────────────────┐   ┌───────────────────────────────┐
+│  Apollo.io API               │   │  Hunter.io API                │
+│  api.apollo.io/api/v1        │   │  api.hunter.io/v2             │
+│                              │   │                               │
+│  PRIMARY (when credits avail)│   │  FALLBACK (when Apollo fails) │
+│  • organizations/enrich      │   │  • domain-search              │
+│  • organizations/{id}/       │   │    GET /?domain=phonepe.com   │
+│    job_postings              │   │    Returns emails + titles    │
+│  • people/match (paid plan)  │   │    sorted by recruiter role   │
+│  • mixed_people/api_search   │   │  50 free searches/month       │
+│    (paid plan)               │   └───────────────────────────────┘
+│  • contacts/search (CRM)     │
+└──────────────────────────────┘
+            │
+            ▼
+┌──────────────────────────────────────────────────────────────┐
+│  data/ (server-side CSV storage)                             │
+│  companies.csv · contacts.csv · company_intel.csv            │
+└──────────────────────────────────────────────────────────────┘
 ```
-
-| Stage | Input | Output |
-| ----- | ----- | ------ |
-| **Upload** | `companies.csv` | Target company list stored in `data/` |
-| **Company Intel** | Companies + domains | `company_intel.csv` — hiring scores, open SDE/backend/MLE roles |
-| **Discover** | Companies | `contacts.csv` — recruiters, managers, emails (when Apollo returns them) |
-| **Review** | `contacts.csv` | Curated list with `send_email` / `special_mail` flags |
-| **Send** | Approved contacts | Emails sent via Gmail; status updated to `SENT` / `FAILED` |
 
 ---
 
-## Features
+## Complete Flow
 
-| Feature | Description |
-| -------- | ----------- |
-| **Company list** | Upload `companies.csv` with company name and domain |
-| **Company intel** | Apollo org enrich + job postings → hiring score per company |
-| **Apollo discovery** | Find recruiters, EMs, hiring managers, and team leads per company |
-| **People match (primary)** | `POST /people/match` with title priority — works on free Apollo plan |
-| **People search (fallback)** | `POST /mixed_people/api_search` — requires paid Apollo API access |
-| **Contact scoring** | Ranks contacts by role relevance, email quality, and open job matches |
-| **Contact export** | Save results to `contacts.csv`; email when Apollo provides it, blank otherwise |
-| **Manual review** | Edit contacts, add emails, remove duplicates, add notes |
-| **Send selection** | Mark `send_email` / `special_mail` per contact |
-| **Email preview** | Review subject and body before sending |
-| **Gmail sending** | Send via Nodemailer + Gmail App Password (1.5s delay between sends) |
-| **Status tracking** | `PENDING` · `SENT` · `FAILED` · `SKIPPED` |
-| **Credit budgeting** | Stops discovery when `APOLLO_CREDIT_LIMIT` is reached (default 75/month) |
-
-**Intentionally excluded:** database, authentication, cloud deployment, AI personalization, Hunter.io, LinkedIn scraping.
+```
+1. Upload Companies CSV          (Dashboard — drag & drop)
+         │
+         ▼
+2. Run Company Intel             (Discover page)
+   └─ Apollo: org enrich → job postings → hiring score per company
+         │
+         ▼
+3. Select Companies + Run Discovery   (Discover page)
+   └─ Per company:
+      ├─ Apollo organizations/enrich  → get org ID
+      ├─ Apollo job_postings          → find open SDE/backend roles
+      ├─ Apollo people/match          → find recruiter/EM with email
+      │   (requires paid Apollo plan or available credits)
+      ├─ Apollo contacts/search       → search your Apollo CRM
+      └─ Hunter.io domain-search      → fallback if Apollo returns nothing
+           (free, 50 searches/month)
+         │
+         ▼
+4. Review contacts               (Review page)
+   └─ Edit emails, names, notes
+   └─ Set send_email = YES
+   └─ Save Changes
+         │
+         ▼
+5. Send emails                   (Send page)
+   └─ Gmail SMTP via Nodemailer
+   └─ 1.5s delay between sends
+   └─ Status → SENT / FAILED
+         │
+         ▼
+6. Download backup CSV           (Dashboard)
+```
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-| ----- | ---------- |
-| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS |
-| Integrations | Apollo API (`X-Api-Key` header), Gmail SMTP (Nodemailer) |
-| Storage | CSV files in `data/` (gitignored) |
-| Runtime | Local machine only (`localhost:3000`) |
+|-------|-----------|
+| Framework | Next.js 15, React 19, TypeScript |
+| Styling | Tailwind CSS v3 |
+| Email sending | Nodemailer + Gmail SMTP (App Password) |
+| Contact discovery | Apollo.io API (primary) + Hunter.io API (fallback) |
+| Storage | Server-side CSV files (`data/` directory) |
+| Runtime | Node.js 18+ — local dev or self-hosted |
 
 ---
 
 ## Prerequisites
 
 | Requirement | Notes |
-| ----------- | ----- |
+|-------------|-------|
 | **Node.js 18+** | Required for Next.js 15 |
-| **Apollo account** | [apollo.io](https://www.apollo.io/) with API key ([Settings → Integrations → API Keys](https://app.apollo.io/#/settings/integrations/api)) |
-| **Gmail account** | With [2-Step Verification](https://myaccount.google.com/security) and an [App Password](https://myaccount.google.com/apppasswords) |
-| **Target companies** | A list of companies you want to reach out to |
+| **Apollo account** | [apollo.io](https://apollo.io) — free plan has limited discovery (see [Apollo Free Plan Reality](#apollo-free-plan--reality)) |
+| **Hunter.io account** | [hunter.io](https://hunter.io) — **requires a work/company email to sign up** (e.g. `you@yourstartup.com`, not Gmail). Free plan: 50 searches/month |
+| **Gmail account** | With 2-Step Verification enabled + an App Password |
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Clone the repository
-git clone <your-repo-url>
+# 1. Clone
+git clone <repo-url>
 cd apollo_leads
 
 # 2. Install dependencies
@@ -125,776 +155,584 @@ npm install
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env with your API keys (see Environment Variables below)
+# Fill in values — see Environment Variables below
 
-# 4. Start the development server
+# 4. Start
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### Production build
-
-```bash
-npm run build
-npm start
-```
-
-### Verify Apollo access before using the app
-
-```bash
-npm run test:apollo -- --company CoinDCX --domain coindcx.com
-```
-
-This probes all Apollo endpoints the app uses and prints a verdict on what works with your plan.
+Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in all values:
-
 ```env
-APOLLO_API_KEY=your_apollo_master_api_key
-GMAIL_EMAIL=your@gmail.com
+# Apollo API — get from apollo.io → Settings → Integrations → API Keys
+APOLLO_API_KEY=your_apollo_api_key
+
+# Hunter.io API — get from hunter.io → Settings → API (requires work email signup)
+HUNTER_API_KEY=your_hunter_api_key
+
+# Gmail SMTP — NOT your regular Google password
+GMAIL_EMAIL=you@gmail.com
 GMAIL_APP_PASSWORD=your_16_char_app_password
+
+# Your profile links — injected into email template
 LINKEDIN_URL=https://linkedin.com/in/yourprofile
 GITHUB_URL=https://github.com/yourusername
 
-# Optional — defaults to 75
+# Optional: app-side credit cap per discovery run (default 75)
 APOLLO_CREDIT_LIMIT=75
+
+# Optional: max contacts to find per company (default 1)
+APOLLO_MAX_PER_COMPANY=1
 ```
 
 | Variable | Required | Purpose |
-| -------- | -------- | ------- |
-| `APOLLO_API_KEY` | Yes | Apollo API authentication (passed as `X-Api-Key` header) |
-| `GMAIL_EMAIL` | Yes | Sender address for outreach emails |
-| `GMAIL_APP_PASSWORD` | Yes | Gmail SMTP auth — **not** your regular Google password |
-| `LINKEDIN_URL` | Yes | Injected into email template as `{{linkedin}}` |
-| `GITHUB_URL` | Yes | Injected into email template as `{{github}}` |
-| `APOLLO_CREDIT_LIMIT` | No | Max Apollo credits to spend per discovery run (default: `75`) |
-
-**Security:** Never commit `.env`. CSV data in `data/` is gitignored by default.
-
----
-
-## End-to-End Workflow
-
-### Overview
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│ 1. Upload       │     │ 2. Discover      │     │ 3. Review       │
-│ companies.csv   │ ──► │ Contacts (Apollo)│ ──► │ contacts.csv    │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                        ┌──────────────────┐              │
-                        │ 4. Send Emails   │ ◄────────────┘
-                        │ (Gmail SMTP)     │
-                        └──────────────────┘
-```
-
-Follow these four steps in order via the sidebar: **Dashboard → Discover → Review → Send**.
+|----------|----------|---------|
+| `APOLLO_API_KEY` | Yes | Passed as `X-Api-Key` header on all Apollo calls |
+| `HUNTER_API_KEY` | Yes (recommended) | Hunter.io fallback when Apollo returns nothing. Without this, companies where Apollo fails get 0 contacts |
+| `GMAIL_EMAIL` | Yes | From address for outreach |
+| `GMAIL_APP_PASSWORD` | Yes | Gmail SMTP authentication |
+| `LINKEDIN_URL` | Yes | Template variable `{{linkedin}}` |
+| `GITHUB_URL` | Yes | Template variable `{{github}}` |
+| `APOLLO_CREDIT_LIMIT` | No | Stops a single run before burning through all credits. Default: 75 |
+| `APOLLO_MAX_PER_COMPANY` | No | Max contacts to save per company. Default: 1 (one hiring manager) |
 
 ---
 
-### Step 1 — Upload Companies (Dashboard `/`)
+## Quick Start
 
-1. Create a `companies.csv` file:
-
-```csv
-company_name,domain
-Groww,groww.in
-Razorpay,razorpay.com
-PhonePe,phonepe.com
-CoinDCX,coindcx.com
-```
-
-| Column | Required | Description |
-| ------ | -------- | ----------- |
-| `company_name` | Yes | Display name of the target company |
-| `domain` | **Strongly recommended** | Company website domain (e.g. `razorpay.com`). Required for Company Intel and improves Apollo org resolution |
-
-> **Tip:** The `domain` column is critical on Apollo's free plan. Without it, org enrichment and `people/match` are less reliable.
-
-2. On the **Dashboard**, click **Upload companies.csv** and select your file.
-3. Confirm the pipeline shows your company count under **Companies → in scope**.
-
-**Alternative:** Place the file directly at `data/companies.csv`. The app reads it fresh on every discovery run.
-
-**Simple format (name only):** A single-column CSV with just `company_name` also works, but domain-less rows limit Apollo matching:
-
-```csv
-company_name
-Groww
-Razorpay
-```
+| Step | Page | Action |
+|------|------|--------|
+| 1 | Terminal | `npm run dev` |
+| 2 | Dashboard `/` | Upload `companies.csv` (left card) |
+| 3 | Discover `/recruiters` | Run **Company Intel**, then **Run Discovery** |
+| 4 | Review `/review` | Set `send_email = YES`, save |
+| 5 | Send `/send` | Preview → Send Selected |
+| 6 | Dashboard `/` | Download CSV backup |
 
 ---
 
-### Step 2 — Discover Contacts & Company Intel (Discover `/recruiters`)
+## Pages & API Routes
 
-This page has two automated actions and displays Apollo API status.
+### Pages
 
-#### 2a. Run Company Intel (works on free Apollo plan)
+| Route | Purpose |
+|-------|---------|
+| `/` | Dashboard — upload companies/contacts, pipeline funnel stats, download CSV |
+| `/recruiters` | Discover — company selection table, intel scores, run discovery, credit tracker |
+| `/review` | Review — edit contacts table, send flags, save changes |
+| `/send` | Send — Gmail status, email preview, bulk send, status tracking |
 
-1. Ensure every company in `companies.csv` has a `domain` column.
-2. Click **Run Company Intel**.
-3. Results are saved to `data/company_intel.csv` and displayed in the **Company Intel Queue** table.
+### API Routes
 
-Company Intel calls:
-
-- `GET /organizations/enrich` — company metadata (industry, employee count, org ID)
-- `GET /organizations/{org_id}/job_postings` — open job titles
-
-Each company gets a **hiring score** based on whether SDE, backend, or MLE roles are open. Use this table to **prioritize** which companies to pursue first.
-
-#### 2b. Run People Discovery (requires Apollo API access)
-
-1. Click **Run People Discovery**.
-2. The app processes each company in `companies.csv` sequentially.
-3. Results are merged into `data/contacts.csv` (append by default; check **Replace existing contacts** to overwrite).
-4. Review the progress table, warnings, and credit usage.
-
-**What gets discovered per company:**
-
-| Role category | Example titles searched |
-| ------------- | ----------------------- |
-| Recruiters | Technical Recruiter, Recruiter, Talent Acquisition |
-| Managers | Engineering Manager, Software Engineering Manager, Backend Engineering Manager, Hiring Manager |
-| Leadership | Team Lead, Director Engineering |
-
-**Retrieved per contact:** name, designation, LinkedIn URL, company, email (if Apollo provides it), contact score, matched job title.
-
-> Contacts **without email** are still saved — add emails manually in Review.
-
-#### 2c. Free plan alternative — add contacts manually or via CLI
-
-If People API Search is blocked (free plan), use one of these:
-
-| Method | How |
-| ------ | --- |
-| **Apollo UI → Review** | Find a recruiter in Apollo's web UI, copy name/email/LinkedIn, paste into Review page |
-| **Upload contacts.csv** | Export from Apollo UI and upload on Dashboard |
-| **CLI fetch** | `npm run fetch:person -- --company CoinDCX --domain coindcx.com --first Virat --last Tomer` |
-
-The free-plan banner on the Discover page walks through this workflow automatically.
-
----
-
-### Step 3 — Manual Review (Review `/review`)
-
-**This step is mandatory.** No emails are sent automatically.
-
-1. Open **Review Contacts**.
-2. For each row:
-   - **Verify** name, designation, and company are correct
-   - **Add** missing email addresses (Apollo often returns LinkedIn without email on free plans)
-   - **Remove** incorrect or duplicate entries
-   - **Add notes** (e.g. *"Strong backend hiring manager — met at conference"*)
-   - Set **`send_email`**: `YES` to include in automated send, `NO` to skip
-   - Set **`special_mail`**: `YES` if you want to email manually (skips automation), `NO` for normal flow
-3. Click **Save Changes** to persist to `contacts.csv`.
-
-#### Contact selection rules
-
-| `send_email` | `special_mail` | Meaning |
-| ------------ | -------------- | ------- |
-| `YES` | `NO` | Eligible for automated Gmail send |
-| `YES` | `YES` | You will email manually — automation skips this contact |
-| `NO` | `NO` | Not selected for outreach |
-
-**Example — recruiter (automate):**
-
-```csv
-send_email,special_mail
-YES,NO
-```
-
-**Example — director (handle manually):**
-
-```csv
-send_email,special_mail
-YES,YES
-```
-
-#### Review page features
-
-- **Filter** contacts by name, company, or email
-- **Sort** by contact score (highest first)
-- **Add row** for manually found contacts
-- **Delete row** to remove bad entries
-- **Unsaved changes warning** if you navigate away before saving
-- **Email quality badges**: Good · Generic inbox · Missing email
-
----
-
-### Step 4 — Preview & Send (Send `/send`)
-
-1. Open **Send Emails**.
-2. Verify the **Gmail status badge** shows Connected (green).
-3. Review the **eligible contacts** list — only contacts matching all send criteria appear.
-4. **Preview** individual emails (subject + body rendered from template).
-5. **Select** contacts to send (or **Select All Eligible**).
-6. Click **Send Selected** — emails go out via Gmail SMTP with a 1.5-second delay between each.
-7. Status updates in `contacts.csv`: `SENT` on success, `FAILED` on error.
-
-#### Send criteria (all must be true)
-
-```
-send_email = YES
-special_mail = NO
-status     = PENDING
-valid      email address
-```
-
-#### After sending
-
-- Successfully sent contacts show status `SENT` and are excluded from future bulk sends.
-- Failed sends show `FAILED` — fix the issue and use **Reset to PENDING** to retry.
-- Download the updated `contacts.csv` from `/api/contacts/export` or inspect `data/contacts.csv` directly.
-
----
-
-### Complete Example Walkthrough
-
-Using CoinDCX as a single-company example (included in the repo's sample data):
-
-```bash
-# 1. Configure .env with your keys
-cp .env.example .env
-
-# 2. Start the app
-npm run dev
-
-# 3. (Optional) Probe Apollo
-npm run test:apollo -- --company CoinDCX --domain coindcx.com
-
-# 4. (Optional) Fetch a specific person via CLI
-npm run fetch:person -- --company CoinDCX --domain coindcx.com --first Virat --last Tomer
-
-# 5. Open browser → Review → set send_email=YES → Send
-open http://localhost:3000/review
-```
-
-Expected `contacts.csv` row after discovery:
-
-```csv
-company_name,person_name,designation,email,linkedin_url,contact_type,source,contact_score,matching_role_found,matched_job_title,email_quality,send_email,special_mail,status,notes
-CoinDCX,Virat Tomer,SDET,virat.tomer@coindcx.com,https://www.linkedin.com/in/tomervirat,Manager,apollo_match,12,YES,Backend Engineer,good,YES,NO,PENDING,
-```
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/api/files` | Upload stats (row counts, timestamps) |
+| `POST` | `/api/files` | Upload CSV (`type=companies` or `type=contacts`) |
+| `GET` | `/api/companies` | Read companies |
+| `PUT` | `/api/companies` | Write companies |
+| `GET` | `/api/companies/export` | Download companies.csv |
+| `GET` | `/api/contacts` | Read contacts |
+| `POST` | `/api/contacts` | Write contacts |
+| `GET` | `/api/contacts/export` | Download contacts.csv |
+| `GET` | `/api/apollo/search` | Probe Apollo connection + capabilities |
+| `POST` | `/api/apollo/search` | Run discovery `{ replace, selectedCompanies, maxPerCompany }` |
+| `GET` | `/api/apollo/company-intel` | Read company intel |
+| `POST` | `/api/apollo/company-intel` | Run company intel `{ replace, selectedCompanies }` |
+| `POST` | `/api/email/preview` | Render email template for a contact |
+| `GET` | `/api/email/send` | Verify Gmail SMTP |
+| `POST` | `/api/email/send` | Send emails `{ indices: [0, 2, 5] }` |
 
 ---
 
 ## CSV Schemas
 
-### `data/companies.csv`
+### companies.csv
 
 ```csv
 company_name,domain
-Groww,groww.in
-Razorpay,razorpay.com
+CoinDCX,coindcx.com
+PhonePe,phonepe.com
+Pidilite,pidilite.com
 ```
 
-| Column | Type | Description |
-| ------ | ---- | ----------- |
-| `company_name` | string | Target company name |
-| `domain` | string | Company website domain (no `https://`) |
+| Column | Required | Notes |
+|--------|----------|-------|
+| `company_name` | Yes | Display name |
+| `domain` | Yes | Without `https://` — required for Apollo org enrich and Hunter.io domain search |
 
----
-
-### `data/contacts.csv`
+### contacts.csv
 
 ```csv
 company_name,person_name,designation,email,linkedin_url,contact_type,source,contact_score,matching_role_found,matched_job_title,email_quality,send_email,special_mail,status,notes
-Groww,John Doe,Engineering Manager,john.doe@groww.in,https://linkedin.com/in/johndoe,Manager,apollo_match,22,YES,Senior Backend Engineer,good,YES,NO,PENDING,Strong backend hiring manager
+CoinDCX,Virat Tomer,SDET,virat.tomer@coindcx.com,https://linkedin.com/in/tomervirat,Manager,apollo_match,12,YES,Backend Engineer,good,YES,NO,PENDING,
 ```
 
 | Column | Values | Description |
-| ------ | ------ | ----------- |
-| `company_name` | string | Target company |
-| `person_name` | string | Full name |
-| `designation` | string | Job title from Apollo or manual entry |
-| `email` | string | Work email (blank if unknown — fill in Review) |
-| `linkedin_url` | string | LinkedIn profile URL |
+|--------|--------|-------------|
 | `contact_type` | Recruiter · Manager · Director | Inferred from title |
-| `source` | string | How contact was found (e.g. `apollo_match`, `api_search`, `contacts_search`) |
-| `contact_score` | number | Computed relevance score (higher = better) |
-| `matching_role_found` | `YES` / `NO` | Company has relevant open SDE/backend/MLE role |
-| `matched_job_title` | string | Best-matching job title from Apollo job postings |
-| `email_quality` | good · generic · missing · missing_name | Email address quality assessment |
-| `send_email` | `YES` / `NO` | Eligible for automated send |
-| `special_mail` | `YES` / `NO` | `YES` = handle manually, skip automation |
-| `status` | `PENDING` · `SENT` · `FAILED` · `SKIPPED` | Outreach status |
-| `notes` | string | Free-text review notes |
-
----
-
-### `data/company_intel.csv`
-
-Generated by **Run Company Intel** on the Discover page.
-
-```csv
-company_name,domain,org_id,industry,employee_count,relevant_roles_found,matched_job_titles,sde_roles_open,backend_roles_open,mle_roles_open,hiring_score,intel_updated,outreach_status,notes
-CoinDCX,coindcx.com,5f8a...,Financial Services,500,YES,Senior Backend Engineer | SDE,YES,YES,NO,35,2025-06-21T...,ACTIVE,
-```
-
-| Column | Description |
-| ------ | ----------- |
-| `hiring_score` | Priority score — higher means more relevant open roles |
-| `sde_roles_open` | `YES` if SDE/software engineer roles found |
-| `backend_roles_open` | `YES` if backend/platform roles found |
-| `mle_roles_open` | `YES` if ML/AI engineer roles found |
-| `matched_job_titles` | Pipe-separated list of matching job titles |
-| `outreach_status` | `ACTIVE` by default — edit to track outreach state |
-
----
-
-## Apollo API Reference
-
-All Apollo calls in this app use:
-
-| Setting | Value |
-| ------- | ----- |
-| **Base URL** | `https://api.apollo.io/api/v1` |
-| **Authentication** | `X-Api-Key: <APOLLO_API_KEY>` header |
-| **Content-Type** | `application/json` |
-| **Rate limiting** | Auto-retry once after 60s on HTTP 429 |
-
-Implementation: `lib/apollo-client.ts`, `lib/apollo.ts`, `lib/company-intel.ts`.
-
----
-
-### Endpoints Used
-
-#### 1. Organization Enrich
-
-```
-GET /organizations/enrich?domain={domain}
-```
-
-| | |
-| - | - |
-| **Cost** | 0 credits |
-| **Used for** | Resolve company name → Apollo org ID and metadata |
-| **When** | Every company during discovery and company intel |
-| **Key response fields** | `organization.id`, `organization.name`, `organization.primary_domain`, `organization.industry`, `organization.estimated_num_employees` |
-
-```bash
-curl -X GET "https://api.apollo.io/api/v1/organizations/enrich?domain=coindcx.com" \
-  -H "X-Api-Key: YOUR_KEY" \
-  -H "Content-Type: application/json"
-```
-
----
-
-#### 2. Organization Search (fallback)
-
-```
-POST /mixed_companies/search?q_organization_name={name}&per_page=5&page=1
-```
-
-| | |
-| - | - |
-| **Cost** | May consume credits on some plans |
-| **Used for** | Find org when domain enrich fails |
-| **When** | `resolveOrganization()` fallback |
-| **Key response fields** | `organizations[].id`, `organizations[].name`, `organizations[].primary_domain` |
-
----
-
-#### 3. Job Postings
-
-```
-GET /organizations/{org_id}/job_postings
-```
-
-| | |
-| - | - |
-| **Cost** | ~1 credit per call |
-| **Used for** | Detect open SDE, backend, and MLE roles; populate `matched_job_title` |
-| **When** | Discovery and Company Intel for each company with a resolved org ID |
-| **Key response fields** | `organization_job_postings[].title` or `job_postings[].title` |
-
----
-
-#### 4. People Match (primary contact discovery)
-
-```
-POST /people/match
-```
-
-| | |
-| - | - |
-| **Cost** | 1 credit **only when email is returned** |
-| **Used for** | Primary contact finder — loops through title priority until email found |
-| **When** | First attempt for every company during discovery |
-| **Body (by org)** | `{ "organization_id": "...", "title": "recruiter", "reveal_personal_emails": false, "reveal_phone_number": false }` |
-| **Body (by person ID)** | `POST /people/match?id={person_id}&reveal_personal_emails=true&domain=...&organization_name=...` |
-| **Key response fields** | `person.id`, `person.first_name`, `person.last_name`, `person.title`, `person.email`, `person.linkedin_url` |
-
-**Title priority loop** (stops at first match with email):
-
-1. talent acquisition
-2. recruiter
-3. technical recruiter
-4. hr
-5. engineering manager
-6. tech lead
-7. senior software engineer
-
----
-
-#### 5. People Bulk Match
-
-```
-POST /people/bulk_match
-```
-
-| | |
-| - | - |
-| **Cost** | 1 credit per person returned with email |
-| **Used for** | Batch matching (up to 10 org IDs per call) |
-| **When** | Exported function `bulkMatchPeople()` — available for future batch workflows |
-| **Body** | `{ "details": [{ "organization_id": "...", "title": "recruiter" }], "reveal_personal_emails": false }` |
-
----
-
-#### 6. People API Search (fallback)
-
-```
-POST /mixed_people/api_search?person_titles[]=Recruiter&person_titles[]=Engineering Manager&q_organization_name={name}&q_organization_domains_list[]={domain}&per_page=25&page=1
-```
-
-| | |
-| - | - |
-| **Cost** | Varies by plan |
-| **Used for** | Fallback when `people/match` returns no results |
-| **When** | Only if primary match path finds zero candidates |
-| **Free plan** | Typically returns `403 API_INACCESSIBLE` |
-| **Key response fields** | `people[].id`, `people[].title`, `people[].has_email`, `people[].linkedin_url` |
-
-> **Important:** Apollo UI credits ≠ API access. The web UI may show emails while the API returns 403 on free plans.
-
----
-
-#### 7. People Enrichment (email reveal)
-
-```
-POST /people/match?id={person_id}&reveal_personal_emails=true&run_waterfall_email=false&domain={domain}&organization_name={name}
-```
-
-| | |
-| - | - |
-| **Cost** | 1 credit when email is returned |
-| **Used for** | Reveal email for people found via API search (who have `has_email: true` but no email in search results) |
-| **When** | After API search fallback, per person without email |
-
----
-
-#### 8. Contacts Search (CRM)
-
-```
-POST /contacts/search
-Body: { "q_keywords": "{company_name}", "per_page": 25, "page": 1 }
-```
-
-| | |
-| - | - |
-| **Cost** | 0 credits |
-| **Used for** | Search contacts already saved in your Apollo CRM |
-| **When** | Fallback alongside API search — only finds people you've previously saved in Apollo |
-| **Note** | Does not discover new people; useful if you've been building lists in Apollo UI |
-
----
-
-### Apollo Error Handling
-
-| HTTP Status | Meaning | App behavior |
-| ----------- | ------- | ------------ |
-| `200` | Success | Parse and continue |
-| `401` | Invalid API key | Throws immediately — check `APOLLO_API_KEY` |
-| `403` | Plan-gated / `API_INACCESSIBLE` | Logs warning, skips endpoint, suggests manual workflow |
-| `422` | Bad domain/name/title | Tries next title in priority loop |
-| `429` | Rate limited | Waits 60 seconds, retries once |
-
----
-
-### Credit Budget
-
-| Action | Typical credit cost |
-| ------ | ------------------- |
-| Org enrich | 0 |
-| Job postings | ~1 per company |
-| People match (with email returned) | 1 per successful match |
-| People enrichment | 1 per email revealed |
-| People API search | Plan-dependent (blocked on free) |
-
-**Default budget:** 75 credits/month (`APOLLO_CREDIT_LIMIT` in `.env`).
-
-**Worst case per company:** ~2 credits (1 job posting + 1 people match).
-
-**Free tier estimate:** ~37 companies/month fully automated.
-
-The discovery run stops and warns when the credit limit is reached mid-batch.
+| `source` | `apollo_match` · `api_search` · `hunter` · `contacts_search` | How contact was found |
+| `contact_score` | number | Higher = contact first (see Scoring) |
+| `matching_role_found` | YES / NO | Company has open SDE/backend/MLE role |
+| `email_quality` | good · generic · missing | Assessed from email pattern |
+| `send_email` | YES / NO | Include in automated send |
+| `special_mail` | YES / NO | YES = manual only, skip automation |
+| `status` | PENDING · SENT · FAILED · SKIPPED | Outreach tracking |
 
 ---
 
 ## Discovery Pipeline
 
-For each company in `companies.csv`, the app runs this pipeline (`lib/apollo.ts` → `discoverRecruiters()`):
+Runs in `lib/apollo.ts → discoverRecruiters()` for each selected company:
 
-```mermaid
-flowchart TD
-    A[Read company from companies.csv] --> B{Has domain?}
-    B -->|Yes| C[GET /organizations/enrich]
-    B -->|No| D[POST /mixed_companies/search]
-    C --> E[GET /organizations/id/job_postings]
-    D --> E
-    E --> F[Match job titles → hiring context]
-    F --> G[POST /people/match - title priority loop]
-    G -->|Email found| H[Save contact with email]
-    G -->|No results| I[POST /mixed_people/api_search]
-    I --> J[POST /contacts/search]
-    J --> K{Person has ID but no email?}
-    K -->|Yes| L[POST /people/match - enrich by ID]
-    K -->|No| M[Save contact - email blank]
-    L --> H
-    H --> N[Score contact + dedupe]
-    M --> N
-    N --> O[Append to contacts.csv]
+```
+Company (name + domain)
+        │
+        ▼
+┌───────────────────────────────────────────────────────┐
+│  STEP 1: Resolve Organization                         │
+│  GET /organizations/enrich?domain={domain}            │
+│  → Apollo org ID, industry, employee count            │
+│  Fallback: POST /mixed_companies/search               │
+└───────────────────────┬───────────────────────────────┘
+                        │ org ID
+                        ▼
+┌───────────────────────────────────────────────────────┐
+│  STEP 2: Fetch Job Postings                           │
+│  GET /organizations/{id}/job_postings                 │
+│  → match SDE / backend / MLE titles                  │
+│  → sets matching_role_found + matched_job_title       │
+│  Cost: 1 enrichment credit                           │
+└───────────────────────┬───────────────────────────────┘
+                        │ job context
+                        ▼
+┌───────────────────────────────────────────────────────┐
+│  STEP 3: Find Contact — 3 fallback layers             │
+│                                                       │
+│  3a. Apollo people/match (PAID PLAN REQUIRED)         │
+│      POST /people/match                               │
+│      Title priority loop:                            │
+│        1. technical recruiter                        │
+│        2. engineering recruiter                      │
+│        3. talent acquisition                         │
+│        4. engineering manager                        │
+│        5. software engineering manager               │
+│        6. hiring manager                             │
+│      → stops at first person with email              │
+│      → if person found without email: save + enrich  │
+│      Cost: 1 email credit if email returned          │
+│                                                       │
+│  3b. Apollo contacts/search (FREE — CRM only)         │
+│      POST /contacts/search                            │
+│      → searches contacts already in your Apollo CRM  │
+│      → returns 0 for companies not in your CRM       │
+│      Cost: 0 credits                                  │
+│                                                       │
+│  3c. Hunter.io domain-search (FREE — 50/month)        │
+│      GET api.hunter.io/v2/domain-search?domain=...   │
+│      → scans publicly indexed emails at the domain   │
+│      → sorts recruiter/EM titles first               │
+│      → runs when 3a + 3b return nothing              │
+└───────────────────────┬───────────────────────────────┘
+                        │ candidates
+                        ▼
+┌───────────────────────────────────────────────────────┐
+│  STEP 4: Score + Dedupe + Save                       │
+│  → applyScoring() — role relevance + job match        │
+│  → deduped by Apollo person ID or name+linkedin       │
+│  → appended to data/contacts.csv                     │
+└───────────────────────────────────────────────────────┘
 ```
 
-**Deduplication key:** Apollo person ID, or `company|name|linkedin` fallback.
-
-**Merge behavior:** Append mode merges with existing contacts (preserves `send_email`, `status`, `notes`). Replace mode overwrites the file.
+**maxPerCompany**: Controlled from the UI selector (1 / 2 / 3 / 5). Default: 1. Caps how many contacts are saved per company. Directly controls credit spend.
 
 ---
 
 ## Contact Scoring
 
-Contacts are ranked by `contact_score` (higher = outreach first). Scoring logic in `lib/scoring.ts`:
+Implemented in `lib/scoring.ts`. Higher score = shown first in Review and Send.
 
 | Factor | Points |
-| ------ | ------ |
+|--------|--------|
 | Engineering Manager / Hiring Manager | +10 |
 | Director Engineering | +8 |
 | Team Lead | +7 |
 | Technical Recruiter / Recruiter | +5 |
 | Talent Acquisition | +4 |
-| Personal-looking email (good quality) | +5 |
-| LinkedIn URL present | +2 |
-| Generic inbox (careers@, hr@, etc.) | −3 |
-| Missing email | −2 |
 | Company has open backend role | +10 |
 | Company has open SDE role | +10 |
 | Company has open MLE role | +10 |
+| Good email (personal work address) | +5 |
+| LinkedIn URL present | +2 |
+| Generic inbox (careers@, hr@) | −3 |
+| Missing email | −2 |
+
+---
+
+## Apollo API Reference
+
+**Base URL:** `https://api.apollo.io/api/v1`  
+**Auth:** `X-Api-Key: <APOLLO_API_KEY>` header on every request  
+**Content-Type:** `application/json`  
+**Rate limit:** Auto-retry once after 60s on HTTP 429
+
+---
+
+### 1. Organization Enrich
+
+```
+GET /organizations/enrich?domain={domain}
+```
+
+Resolves a domain to an Apollo org ID and company metadata.
+
+```bash
+curl "https://api.apollo.io/api/v1/organizations/enrich?domain=phonepe.com" \
+  -H "X-Api-Key: YOUR_KEY"
+```
+
+**Response fields used:**
+
+```json
+{
+  "organization": {
+    "id": "5f8abc...",
+    "name": "PhonePe",
+    "primary_domain": "phonepe.com",
+    "industry": "Financial Services",
+    "estimated_num_employees": 20000,
+    "short_description": "...",
+    "linkedin_url": "https://linkedin.com/company/phonepe"
+  }
+}
+```
+
+| | |
+|-|-|
+| **Cost** | 1 enrichment credit |
+| **Free plan** | ✅ Yes (uses enrichment credits from monthly quota) |
+| **Used for** | Get org ID required for all subsequent calls |
+
+---
+
+### 2. Job Postings
+
+```
+GET /organizations/{org_id}/job_postings
+```
+
+Returns open roles at the company.
+
+```bash
+curl "https://api.apollo.io/api/v1/organizations/5f8abc.../job_postings" \
+  -H "X-Api-Key: YOUR_KEY"
+```
+
+**Response fields used:**
+
+```json
+{
+  "job_postings": [
+    { "title": "Senior Backend Engineer", "location": "Bengaluru", "posted_at": "2025-06-01" }
+  ]
+}
+```
+
+| | |
+|-|-|
+| **Cost** | 1 enrichment credit |
+| **Free plan** | ✅ Yes |
+| **Used for** | Detect SDE/backend/MLE roles → `matching_role_found`, `matched_job_title` |
+
+---
+
+### 3. People Match
+
+```
+POST /people/match
+```
+
+Finds the best matching person at a company by title. Costs 1 credit **only** when email is returned.
+
+```bash
+curl -X POST "https://api.apollo.io/api/v1/people/match" \
+  -H "X-Api-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organization_id": "5f8abc...",
+    "title": "engineering manager",
+    "reveal_personal_emails": false,
+    "reveal_phone_number": false,
+    "run_waterfall_phone": false
+  }'
+```
+
+**Response fields used:**
+
+```json
+{
+  "person": {
+    "id": "63519a...",
+    "first_name": "Priya",
+    "last_name": "Sharma",
+    "title": "Senior Engineering Manager",
+    "email": "priya.sharma@phonepe.com",
+    "linkedin_url": "https://linkedin.com/in/priyasharma",
+    "has_email": true
+  }
+}
+```
+
+| | |
+|-|-|
+| **Cost** | 1 email credit (only when `person.email` is returned) |
+| **Free plan** | ❌ **Requires paid plan** — returns 403 on free plan |
+| **Used for** | Primary contact finder — looped over title priority |
+
+> **Note:** `reveal_phone_number: false` and `run_waterfall_phone: false` are always set explicitly to prevent mobile credit usage.
+
+---
+
+### 4. People API Search
+
+```
+POST /mixed_people/api_search?person_titles[]=...&organization_names[]=...&organization_domains[]=...&per_page=10&page=1
+```
+
+Searches Apollo's 200M+ contact database. No body — all params in query string.
+
+```bash
+curl -X POST "https://api.apollo.io/api/v1/mixed_people/api_search?\
+person_titles[]=technical%20recruiter&\
+person_titles[]=engineering%20manager&\
+organization_names[]=PhonePe&\
+organization_domains[]=phonepe.com&\
+per_page=10&page=1" \
+  -H "X-Api-Key: YOUR_KEY" \
+  -H "Content-Type: application/json"
+```
+
+**Response fields used:**
+
+```json
+{
+  "people": [
+    {
+      "id": "67da57...",
+      "first_name": "Carrie",
+      "last_name_obfuscated": "Ki***r",
+      "title": "Technical Recruiter",
+      "has_email": true,
+      "organization": { "name": "PhonePe" }
+    }
+  ]
+}
+```
+
+| | |
+|-|-|
+| **Cost** | 0 credits for search. 1 email credit per reveal via `people/match?id=...` |
+| **Free plan** | ❌ **Requires paid plan** — returns 403 on free plan |
+| **Used for** | Fallback people discovery if `people/match` finds nothing |
+| **Note** | Returns obfuscated last names. Full profile + email fetched separately via enrichment |
+
+---
+
+### 5. People Enrichment (Email Reveal by ID)
+
+```
+POST /people/match?id={person_id}&reveal_personal_emails=false&run_waterfall_email=true&run_waterfall_phone=false&reveal_phone_number=false&domain={domain}
+```
+
+Reveals the email for a person found via search (who has `has_email: true` but no email in search results).
+
+| | |
+|-|-|
+| **Cost** | 1 email credit when email returned |
+| **Free plan** | ❌ Requires paid plan |
+| **Used for** | Reveal email after api_search finds a person without one |
+
+---
+
+### 6. Contacts Search (CRM)
+
+```
+POST /contacts/search
+Body: { "q_keywords": "PhonePe", "per_page": 25, "page": 1 }
+```
+
+| | |
+|-|-|
+| **Cost** | 0 credits |
+| **Free plan** | ✅ Yes — but only returns contacts **already saved in your Apollo CRM** |
+| **Used for** | Fallback — finds people you've previously added to Apollo manually |
+| **Limitation** | Returns nothing for companies you haven't interacted with in Apollo |
+
+---
+
+### Apollo Error Handling
+
+| Status | Meaning | App behavior |
+|--------|---------|-------------|
+| `200` | Success | Parse normally |
+| `401` | Invalid API key | Throws immediately |
+| `403` | Plan-gated or insufficient scope | Silently skipped — fallback to Hunter.io |
+| `422` | Bad param (title/domain not found) | Tries next title in priority loop |
+| `429` | Rate limited | Waits 60s, retries once |
+| `"insufficient credits"` in 200 response | Monthly credits exhausted | Treated as failure, falls back to Hunter.io |
+
+---
+
+## Hunter.io API Reference
+
+**Base URL:** `https://api.hunter.io/v2`  
+**Auth:** `api_key` query parameter on every request  
+**Free plan:** 50 searches/month  
+**Signup:** Requires a work/company email (not Gmail/Hotmail)
+
+---
+
+### Domain Search
+
+```
+GET /domain-search?domain={domain}&api_key={key}&limit=20
+```
+
+Returns all emails Hunter.io has found publicly indexed at a domain, with names and job titles.
+
+```bash
+curl "https://api.hunter.io/v2/domain-search?domain=phonepe.com&api_key=YOUR_KEY&limit=20"
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "domain": "phonepe.com",
+    "organization": "PhonePe",
+    "emails": [
+      {
+        "value": "priya.sharma@phonepe.com",
+        "first_name": "Priya",
+        "last_name": "Sharma",
+        "position": "Technical Recruiter",
+        "linkedin": "https://linkedin.com/in/priyasharma",
+        "confidence": 92,
+        "type": "personal"
+      }
+    ]
+  }
+}
+```
+
+| | |
+|-|-|
+| **Cost** | 1 search credit per domain |
+| **Free plan** | ✅ 50 searches/month |
+| **Used for** | Contact discovery fallback when Apollo returns no contacts |
+| **Sorting** | App sorts recruiter/hiring manager titles first, then all others |
+
+**Title keywords sorted first** (defined in `lib/hunter.ts`):  
+`recruiter`, `talent acquisition`, `talent`, `hiring`, `hr`, `people`, `engineering manager`, `team lead`
+
+---
+
+### Email Finder (available, not currently wired)
+
+```
+GET /email-finder?domain={domain}&first_name={first}&last_name={last}&api_key={key}
+```
+
+Finds the email for a specific person by name at a domain. Can be used when you already know who you want to contact (e.g. from LinkedIn).
+
+```bash
+curl "https://api.hunter.io/v2/email-finder?domain=phonepe.com&first_name=Priya&last_name=Sharma&api_key=YOUR_KEY"
+```
+
+---
+
+### Email Verification (available, not currently wired)
+
+```
+GET /email-verifier?email={email}&api_key={key}
+```
+
+Verifies if an email address is deliverable. Returns `status: valid | invalid | accept_all | unknown`.
+
+---
+
+## Apollo Free Plan — Reality
+
+Based on direct API testing, here is what actually works on Apollo's free plan (120 credits/month):
+
+| Endpoint | Free plan | Cost | Notes |
+|----------|-----------|------|-------|
+| `organizations/enrich` | ✅ | 1 enrichment credit | Exhausted after ~107 calls in testing |
+| `organizations/{id}/job_postings` | ✅ | 1 enrichment credit | Works while enrichment credits available |
+| `contacts/search` | ✅ | 0 credits | CRM only — your own saved contacts |
+| `mixed_companies/search` | ✅ | Credits vary | Org search fallback |
+| **`people/match`** | ❌ | — | **Plan-gated** — 403 on free plan |
+| **`mixed_people/api_search`** | ❌ | — | **Plan-gated** — 403 on free plan |
+
+**Credit types on free plan (120/mo total):**
+
+| Type | Monthly limit | Used by this app |
+|------|--------------|-----------------|
+| Email reveals | 50 | ✅ via people/match (paid only) |
+| Enrichment | varies | ✅ org enrich + job postings |
+| Mobile/phone | 8 | ❌ explicitly disabled — `reveal_phone_number: false` |
+| AI | 0 | ❌ not used |
+
+**Bottom line:** On the free plan, Apollo can only enrich company metadata and read your own CRM. **Contact discovery requires Hunter.io** (or an Apollo paid plan starting at $49/month).
 
 ---
 
 ## Email Template
 
-Single reusable template at `templates/default-email.txt`. Edit this file directly — no AI generation.
+Single template at `templates/default-email.txt`. Edit directly — no AI, no dynamic generation.
 
-**Current template variables:**
-
-| Variable | Source | Example |
-| -------- | ------ | ------- |
-| `{{name}}` | Contact first name | `John` |
-| `{{company}}` | Company name | `Groww` |
-| `{{designation}}` | Job title | `Engineering Manager` |
-| `{{matched_role}}` | Best matching open role from job postings | `Senior Backend Engineer` |
-| `{{linkedin}}` | Your LinkedIn URL from `.env` | `https://linkedin.com/in/you` |
-| `{{github}}` | Your GitHub URL from `.env` | `https://github.com/you` |
-
-**Template format:**
+**Format:**
 
 ```
 Subject: {{matched_role}} role at {{company}}
 
 Hi {{name}},
 
-... body text ...
+I came across an opening for {{matched_role}} at {{company}} and wanted to reach out...
 
 LinkedIn: {{linkedin}}
 GitHub: {{github}}
 ```
 
-The first line starting with `Subject:` becomes the email subject. Everything after is the body.
+**Variables:**
 
----
-
-## Application Pages & API Routes
-
-### Pages
-
-| Step | Route | Purpose |
-| ---- | ----- | ------- |
-| 01 Dashboard | `/` | Upload CSVs, view pipeline stats, quick setup |
-| 02 Discover | `/recruiters` | Company intel, Apollo people discovery, API status |
-| 03 Review | `/review` | Edit contacts table, set send flags, save CSV |
-| 04 Send | `/send` | Preview emails, send via Gmail, track status |
-
-### API Routes
-
-| Method | Route | Purpose |
-| ------ | ----- | ------- |
-| `GET` | `/api/files` | File stats (company/contact counts, pending/sent) |
-| `POST` | `/api/files` | Upload `companies.csv` or `contacts.csv` |
-| `GET` | `/api/companies` | Read companies from CSV |
-| `POST` | `/api/companies` | Write companies to CSV |
-| `GET` | `/api/contacts` | Read contacts from CSV |
-| `POST` | `/api/contacts` | Write contacts to CSV |
-| `GET` | `/api/contacts/export` | Download `contacts.csv` |
-| `GET` | `/api/apollo/search` | Test Apollo connection + probe capabilities |
-| `POST` | `/api/apollo/search` | Run people discovery (`{ "replace": true/false }`) |
-| `GET` | `/api/apollo/company-intel` | Read company intel + capabilities |
-| `POST` | `/api/apollo/company-intel` | Run company intel (`{ "replace": true/false }`) |
-| `POST` | `/api/email/preview` | Preview rendered email for a contact |
-| `GET` | `/api/email/send` | Verify Gmail SMTP connection |
-| `POST` | `/api/email/send` | Send emails (`{ "indices": [0, 2, 5] }`) |
-
----
-
-## CLI Scripts
-
-### `npm run test:apollo` — Probe Apollo API access
-
-Tests every endpoint the app uses and prints a verdict.
-
-```bash
-# Default: CoinDCX / coindcx.com
-npm run test:apollo
-
-# Custom company
-npm run test:apollo -- --company Razorpay --domain razorpay.com
-```
-
-**Endpoints probed:**
-
-1. `POST /mixed_companies/search`
-2. `GET /organizations/enrich`
-3. `POST /mixed_people/api_search`
-4. `POST /people/match` (enrichment by person ID)
-5. `POST /contacts/search`
-6. `GET /organizations/{org_id}/job_postings`
-
----
-
-### `npm run fetch:person` — Fetch one person by name
-
-Uses `people/match` to find a specific person and writes them to `contacts.csv`.
-
-```bash
-npm run fetch:person -- \
-  --company CoinDCX \
-  --domain coindcx.com \
-  --first Virat \
-  --last Tomer
-```
-
-**What it does:**
-
-1. Ensures company exists in `companies.csv`
-2. `GET /organizations/enrich` → org ID
-3. `POST /people/match` with first/last name + org ID
-4. Upserts contact to `data/contacts.csv`
-5. Prints email preview from `templates/default-email.txt`
-
-Useful on Apollo free plans where the UI discovery button is disabled but `people/match` still works.
+| Variable | Source |
+|----------|--------|
+| `{{name}}` | Contact's first name |
+| `{{company}}` | Company name |
+| `{{designation}}` | Contact's job title |
+| `{{matched_role}}` | Best matching open role from job postings |
+| `{{linkedin}}` | Your LinkedIn URL from `.env` |
+| `{{github}}` | Your GitHub URL from `.env` |
 
 ---
 
 ## Gmail Setup
 
-1. Enable **2-Step Verification** on your Google account:
-   [myaccount.google.com/security](https://myaccount.google.com/security)
-
-2. Create an **App Password**:
-   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-   - Select app: **Mail**
-   - Select device: **Other** → name it "SDE Outreach"
+1. Enable **2-Step Verification**: [myaccount.google.com/security](https://myaccount.google.com/security)
+2. Create an **App Password**: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+   - App: Mail · Device: Other → name it "SDE Outreach"
    - Copy the 16-character password (no spaces)
-
 3. Add to `.env`:
-
-```env
-GMAIL_EMAIL=you@gmail.com
-GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
-```
-
-4. Verify on the **Send** page — the Gmail status badge should show **Connected**.
-
-**Sender name:** Emails are sent as `"Tanmay Dikshit" <your@gmail.com>`. Edit `lib/gmail.ts` to change the display name.
-
----
-
-## Apollo Account Setup
-
-1. Sign up at [apollo.io](https://www.apollo.io/)
-2. Go to **Settings → Integrations → API Keys**
-3. Create a new key with **Set as master key** enabled
-4. Copy the key to `.env` as `APOLLO_API_KEY`
-5. Run the probe to verify access:
-
-```bash
-npm run test:apollo -- --company CoinDCX --domain coindcx.com
-```
-
-### UI ≠ API (always test first)
-
-Apollo may show names, emails, and credits in the **web UI** while the **API returns 403 or no email field** on the same account.
-
-| Probe result | What to do |
-| ------------ | ---------- |
-| People API Search works | Use **Run People Discovery** in the app |
-| `403 API_INACCESSIBLE` on free plan | Use Company Intel + manual contacts, or `fetch:person` CLI |
-| Email in `people/match` verdict | Full discovery + Gmail pipeline works |
-| Network timeout | Check VPN/firewall for `api.apollo.io` |
-
-**Official docs:** [Apollo API Reference](https://docs.apollo.io/reference)
-
----
-
-## Free Plan vs Paid Plan
-
-| Capability | Free plan | Paid plan |
-| ---------- | --------- | --------- |
-| Org enrich (`/organizations/enrich`) | ✅ Works | ✅ Works |
-| Job postings (`/organizations/{id}/job_postings`) | ✅ Works (~1 credit) | ✅ Works |
-| Company Intel in app | ✅ Works | ✅ Works |
-| People match (`/people/match`) | ✅ Usually works (1 credit/email) | ✅ Works |
-| People API Search (`/mixed_people/api_search`) | ❌ Usually blocked (403) | ✅ Works |
-| `fetch:person` CLI | ✅ Works if match returns email | ✅ Works |
-| Run People Discovery button | ❌ Disabled when search blocked | ✅ Enabled |
-| Manual contact entry (Review) | ✅ Always works | ✅ Always works |
-| Upload contacts.csv | ✅ Always works | ✅ Always works |
-
-### Recommended free-plan workflow
-
-1. Upload `companies.csv` with `company_name,domain`
-2. Run **Company Intel** → prioritize high `hiring_score` companies
-3. Find recruiters in Apollo UI for top companies
-4. Add contacts via **Review** page, **upload contacts.csv**, or `npm run fetch:person`
-5. Set `send_email=YES`, preview, and send from **Send** page
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-| ------- | -------- |
-| **Apollo API: Not configured** | Set `APOLLO_API_KEY` in `.env`, restart `npm run dev` |
-| **401 Invalid API key** | Regenerate key in Apollo settings; ensure master key is enabled |
-| **403 API_INACCESSIBLE** | Free plan blocks People Search — use manual workflow or `fetch:person` |
-| **No contacts found** | Add `domain` column to companies.csv; run `npm run test:apollo` |
-| **Contacts have no email** | Normal on free plan — add emails manually on Review page |
-| **Gmail: Not connected** | Check App Password (not regular password); enable 2FA first |
-| **Send button disabled** | Contact needs `send_email=YES`, `special_mail=NO`, `status=PENDING`, valid email |
-| **Discovery stopped mid-run** | Credit limit reached — increase `APOLLO_CREDIT_LIMIT` in `.env` |
-| **Duplicate contacts** | Review page → remove dupes; discovery dedupes by person ID / name+LinkedIn |
-| **Changes lost on Review** | Click **Save Changes** before navigating away |
-| **Network timeout to api.apollo.io** | Check VPN, firewall, or try again later |
+   ```env
+   GMAIL_EMAIL=you@gmail.com
+   GMAIL_APP_PASSWORD=abcdabcdabcdabcd
+   ```
+4. Verify: **Send page** → Gmail status badge → Connected
 
 ---
 
@@ -903,83 +741,86 @@ Apollo may show names, emails, and credits in the **web UI** while the **API ret
 ```
 apollo_leads/
 ├── app/
-│   ├── page.tsx                      # Dashboard — upload CSVs, pipeline stats
-│   ├── recruiters/page.tsx           # Discover — company intel + people discovery
-│   ├── review/page.tsx               # Review — edit contacts, set send flags
-│   ├── send/page.tsx                 # Send — preview + Gmail send
-│   ├── layout.tsx                    # App shell with sidebar
+│   ├── page.tsx                       # Dashboard — upload, pipeline stats
+│   ├── recruiters/page.tsx            # Discover — company selection, intel, discovery
+│   ├── review/page.tsx                # Review — edit contacts, send flags
+│   ├── send/page.tsx                  # Send — Gmail preview + bulk send
+│   ├── layout.tsx                     # App shell + sidebar
 │   └── api/
 │       ├── apollo/
-│       │   ├── search/route.ts       # People discovery (GET = probe, POST = run)
-│       │   └── company-intel/route.ts
-│       ├── companies/route.ts        # companies.csv CRUD
+│       │   ├── search/route.ts        # GET: probe | POST: run discovery
+│       │   └── company-intel/route.ts # GET: read intel | POST: run intel
+│       ├── companies/
+│       │   ├── route.ts               # GET/PUT companies
+│       │   └── export/route.ts        # Download companies.csv
 │       ├── contacts/
-│       │   ├── route.ts              # contacts.csv CRUD
-│       │   └── export/route.ts       # Download contacts.csv
+│       │   ├── route.ts               # GET/POST contacts
+│       │   └── export/route.ts        # Download contacts.csv
 │       ├── email/
-│       │   ├── preview/route.ts      # Template preview
-│       │   └── send/route.ts         # Gmail send + verify
-│       └── files/route.ts            # Upload + stats
+│       │   ├── preview/route.ts       # Render email for a contact
+│       │   └── send/route.ts          # Gmail send + verify
+│       └── files/route.ts             # CSV upload + stats
 ├── components/
-│   ├── Sidebar.tsx                   # 4-step navigation
-│   ├── Button.tsx, Card.tsx, Badge.tsx, ...
-├── data/                             # CSV storage (gitignored)
+│   ├── StatCard.tsx                   # Icon + stat + label card
+│   ├── Sidebar.tsx                    # 4-step navigation
+│   ├── Button.tsx
+│   ├── Card.tsx
+│   ├── Badge.tsx
+│   ├── PageHeader.tsx
+│   └── CsvUploadCard.tsx              # Drag-and-drop upload zone
+├── lib/
+│   ├── apollo.ts                      # Discovery pipeline — main logic
+│   ├── apollo-client.ts               # HTTP fetch wrapper + X-Api-Key auth
+│   ├── apollo-capabilities.ts         # Endpoint probe + 5-min cache
+│   ├── hunter.ts                      # Hunter.io domain-search fallback
+│   ├── company-intel.ts               # Company intel pipeline
+│   ├── csv.ts                         # CSV read / write / merge / dedupe
+│   ├── discovery-summary.ts           # Rollup stats from discovery results
+│   ├── email-quality.ts               # Email quality assessment
+│   ├── gmail.ts                       # Nodemailer Gmail transport
+│   ├── scoring.ts                     # Contact score + job matching
+│   ├── template.ts                    # Email template rendering
+│   └── validation.ts                  # Email address validation
+├── data/                              # Server-side CSV storage (gitignored)
 │   ├── companies.csv
 │   ├── contacts.csv
 │   └── company_intel.csv
-├── lib/
-│   ├── apollo.ts                     # Discovery pipeline (primary logic)
-│   ├── apollo-client.ts              # HTTP client + auth
-│   ├── apollo-capabilities.ts        # Endpoint probe for plan detection
-│   ├── company-intel.ts              # Company intel pipeline
-│   ├── csv.ts                        # CSV read/write/merge
-│   ├── discovery-summary.ts          # Discovery stats rollups
-│   ├── email-quality.ts              # Email quality assessment
-│   ├── gmail.ts                      # Nodemailer Gmail transport
-│   ├── scoring.ts                    # Contact + hiring scores
-│   ├── template.ts                   # Email template rendering
-│   └── validation.ts                 # Email validation
 ├── scripts/
-│   ├── test-apollo-email.mjs         # Apollo API probe CLI
-│   └── fetch-person.mjs              # Fetch single person CLI
+│   ├── test-apollo-email.mjs          # CLI: probe Apollo endpoints
+│   └── fetch-person.mjs               # CLI: fetch one person by name
 ├── templates/
-│   └── default-email.txt             # Email subject + body template
-├── .env.example
+│   └── default-email.txt             # Email subject + body
+├── .env                               # Secrets (gitignored)
+├── .env.example                       # Template — copy to .env
 ├── package.json
 └── Readme.md
 ```
 
 ---
 
-## Scripts Reference
+## Troubleshooting
 
-| Command | Description |
-| ------- | ----------- |
-| `npm run dev` | Start development server at `localhost:3000` |
-| `npm run build` | Production build |
-| `npm start` | Run production server |
-| `npm run lint` | ESLint |
-| `npm run test:apollo` | Probe Apollo API endpoints for your plan |
-| `npm run fetch:person` | Fetch one person by name via `people/match` |
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Apollo returns no contacts | Free plan — `people/match` + `api_search` both require paid plan | Add `HUNTER_API_KEY` to `.env` |
+| "insufficient credits" from Apollo | Monthly enrichment credits exhausted (120/mo) | Wait for monthly reset, or upgrade Apollo |
+| Hunter.io returns only Sales roles | No recruiter/EM indexed at that domain | Add contacts manually on Review page |
+| 403 on all Apollo people endpoints | Free plan restriction | Expected — Hunter.io handles this |
+| 401 Invalid API key | Wrong key in `.env` | Regenerate at apollo.io → Settings → API Keys |
+| Upload fails | CSV missing `company_name` column | Check header row format |
+| Gmail not connected | Wrong App Password or 2FA not enabled | Follow [Gmail Setup](#gmail-setup) |
+| Send button disabled | `send_email ≠ YES` or `status ≠ PENDING` or missing email | Fix on Review page |
+| Mobile credits used unexpectedly | Old code without phone disable flags | All calls now have `reveal_phone_number: false` + `run_waterfall_phone: false` |
+| Next.js cache stale | After many code changes | `rm -rf .next && npm run dev` |
 
 ---
 
 ## Out of Scope
 
-The following are **not** included by design:
-
-- Hunter.io / email verification services
-- LinkedIn scraping or enrichment
-- Multiple email templates (single template only)
-- AI personalization (Claude/GPT)
-- Follow-up email automation
-- Analytics dashboard / CRM
 - Multi-user support or authentication
-- Cloud deployment (Vercel, Docker, etc.)
-- Email open/click tracking
-
----
-
-## License
-
-Private personal project. Not licensed for commercial redistribution.
+- AI email personalisation
+- LinkedIn scraping
+- Follow-up automation
+- Open/click tracking
+- Cloud deployment without persistent volume
+- CRM integrations

@@ -5,7 +5,7 @@ import { apolloFetch } from "./apollo-client";
 import type { Company } from "./csv";
 import { computeHiringScore, matchJobPostings } from "./scoring";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 const INTEL_PATH = path.join(DATA_DIR, "company_intel.csv");
 
 export interface CompanyIntel {

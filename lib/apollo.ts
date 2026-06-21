@@ -1,28 +1,27 @@
 import type { Company, Contact } from "./csv";
 import { apolloFetch } from "./apollo-client";
+import { hunterDomainSearch } from "./hunter";
 import { applyScoring, matchJobPostings, type JobMatchContext } from "./scoring";
 
+// Titles for api_search filter — SDE hiring managers only
 const TARGET_TITLES = [
   "Technical Recruiter",
-  "Recruiter",
+  "Engineering Recruiter",
   "Talent Acquisition",
   "Engineering Manager",
   "Software Engineering Manager",
   "Hiring Manager",
   "Backend Engineering Manager",
-  "Team Lead",
-  "Director Engineering",
 ];
 
-// Title priority for people/match — recruiter-first, engineer as last resort
+// Title priority for people/match — SDE hiring manager focused, no generic HR or engineers
 const MATCH_TITLE_PRIORITY = [
-  "talent acquisition",
-  "recruiter",
   "technical recruiter",
-  "hr",
+  "engineering recruiter",
+  "talent acquisition",
   "engineering manager",
-  "tech lead",
-  "senior software engineer",
+  "software engineering manager",
+  "hiring manager",
 ];
 
 interface ApolloPerson {
@@ -181,35 +180,26 @@ async function searchPeopleApiSearch(
   companyName: string,
   domain?: string
 ): Promise<RawCandidate[]> {
-  const perPage = 25;
-  const maxPages = 20;
   const all: RawCandidate[] = [];
 
-  for (let page = 1; page <= maxPages; page++) {
-    const params = new URLSearchParams();
-    TARGET_TITLES.forEach((title) => params.append("person_titles[]", title));
-    params.append("include_similar_titles", "true");
-    params.append("q_organization_name", companyName);
-    if (domain) params.append("q_organization_domains_list[]", domain);
-    params.append("per_page", String(perPage));
-    params.append("page", String(page));
+  // Build params exactly as Apollo docs show — no body, all filters in query string
+  const params = new URLSearchParams();
+  TARGET_TITLES.forEach((title) => params.append("person_titles[]", title));
+  // organization_names[] is the correct filter for company name in api_search
+  params.append("organization_names[]", companyName);
+  if (domain) params.append("organization_domains[]", domain);
+  params.append("per_page", "10");
+  params.append("page", "1");
 
-    const data = await apolloFetch<ApolloSearchResponse>(
-      `/mixed_people/api_search?${params.toString()}`,
-      { method: "POST", body: JSON.stringify({}) }
-    );
+  // No body — matches the Apollo docs cURL example exactly
+  const data = await apolloFetch<ApolloSearchResponse>(
+    `/mixed_people/api_search?${params.toString()}`,
+    { method: "POST" }
+  );
 
-    const people = data.people ?? [];
-    for (const person of people) {
-      if (!matchesTargetTitle(person.title ?? "")) continue;
-      all.push({ person, source: "api_search" });
-    }
-
-    if (people.length < perPage) break;
-    if (typeof data.total_entries === "number" && page * perPage >= data.total_entries) {
-      break;
-    }
-    await delay(200);
+  for (const person of data.people ?? []) {
+    if (!matchesTargetTitle(person.title ?? "")) continue;
+    all.push({ person, source: "api_search" });
   }
 
   return all;
@@ -273,43 +263,57 @@ async function fetchJobPostingTitles(orgId: string): Promise<string[]> {
 }
 
 // Primary contact discovery — POST /people/match with org_id + title priority loop.
-// Costs 1 credit only when email is returned. Returns null if no email found.
+// Costs 1 credit only when email is returned. Falls back to best no-email candidate.
 async function matchPersonByTitle(
   orgId: string,
+  domain?: string,
   titlePriority: string[] = MATCH_TITLE_PRIORITY
 ): Promise<{ person: ApolloPerson; creditsUsed: number } | null> {
   let creditsUsed = 0;
+  let bestNoEmail: ApolloPerson | null = null;
 
-  for (const title of titlePriority) {
-    try {
-      const data = await apolloFetch<{ person?: ApolloPerson }>(
-        "/people/match",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            organization_id: orgId,
-            title,
-            reveal_personal_emails: false,
-            reveal_phone_number: false,
-          }),
+  // Pass 1: try every title with organization_id
+  // Pass 2: try every title with domain (only if pass 1 found nothing)
+  const matchKeys: Array<Record<string, string>> = [{ organization_id: orgId }];
+  if (domain) matchKeys.push({ domain });
+
+  for (const matchKey of matchKeys) {
+    for (const title of titlePriority) {
+      try {
+        const data = await apolloFetch<{ person?: ApolloPerson }>(
+          "/people/match",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              ...matchKey,
+              title,
+              reveal_personal_emails: false,
+              reveal_phone_number: false,
+              run_waterfall_phone: false,
+            }),
+          }
+        );
+
+        const person = data.person;
+        if (person?.email) {
+          creditsUsed++;
+          return { person, creditsUsed };
         }
-      );
-
-      const person = data.person;
-      if (person?.email) {
-        creditsUsed++;
-        return { person, creditsUsed };
+        if (person && !bestNoEmail) {
+          bestNoEmail = person;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        // 403 = endpoint blocked for this plan/key — stop all attempts
+        if (msg.includes("(403)")) return bestNoEmail ? { person: bestNoEmail, creditsUsed: 0 } : null;
       }
-      // No email returned → no credit charged, try next title
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (msg.includes("(403)")) break;
-      // 422 = unprocessable for this title → try next
+      await delay(150);
     }
-    await delay(200);
+    // Found a no-email candidate in pass 1 — no need for pass 2
+    if (bestNoEmail) break;
   }
 
-  return null;
+  return bestNoEmail ? { person: bestNoEmail, creditsUsed: 0 } : null;
 }
 
 // Batch contact discovery — POST /people/bulk_match, up to 10 org_ids per call.
@@ -330,6 +334,8 @@ export async function bulkMatchPeople(
           body: JSON.stringify({
             details: batch.map((orgId) => ({ organization_id: orgId, title })),
             reveal_personal_emails: false,
+            reveal_phone_number: false,
+            run_waterfall_phone: false,
           }),
         }
       );
@@ -355,8 +361,8 @@ async function enrichPersonEmail(
   try {
     const params = new URLSearchParams();
     params.set("id", personId);
-    params.set("reveal_personal_emails", "true");
-    params.set("run_waterfall_email", "false");
+    params.set("reveal_personal_emails", "false");
+    params.set("run_waterfall_email", "true");
     params.set("run_waterfall_phone", "false");
     params.set("reveal_phone_number", "false");
     if (org?.domain) params.set("domain", org.domain);
@@ -470,7 +476,10 @@ export interface DiscoveryResult {
 
 export async function discoverRecruiters(
   companies: Company[],
-  onProgress?: (progress: DiscoveryProgress) => void
+  options: {
+    maxPerCompany?: number;
+    onProgress?: (progress: DiscoveryProgress) => void;
+  } = {}
 ): Promise<DiscoveryResult> {
   const allContacts: Contact[] = [];
   const progress: DiscoveryProgress[] = [];
@@ -480,6 +489,9 @@ export async function discoverRecruiters(
   let sawFreePlanBlock = false;
   let totalCreditsUsed = 0;
   const CREDIT_LIMIT = parseInt(process.env.APOLLO_CREDIT_LIMIT ?? "75", 10);
+  // Cap contacts per company — UI value takes priority over env var
+  const MAX_PER_COMPANY =
+    options.maxPerCompany ?? parseInt(process.env.APOLLO_MAX_PER_COMPANY ?? "1", 10);
 
   for (const company of companies) {
     const companyName = company.company_name;
@@ -501,7 +513,7 @@ export async function discoverRecruiters(
         `Apollo credit limit (${CREDIT_LIMIT}) reached — stopped before processing ${companyName}. Increase APOLLO_CREDIT_LIMIT in .env to continue.`
       );
       progress.push(companyProgress);
-      onProgress?.(companyProgress);
+      options.onProgress?.(companyProgress);
       break;
     }
 
@@ -533,7 +545,10 @@ export async function discoverRecruiters(
       // PRIMARY: people/match with title priority — works on free plan, 1 credit per email returned
       if (org?.id && totalCreditsUsed < CREDIT_LIMIT) {
         try {
-          const matchResult = await matchPersonByTitle(org.id);
+          const matchResult = await matchPersonByTitle(
+            org.id,
+            org.domain || company.domain || undefined
+          );
           if (matchResult) {
             totalCreditsUsed += matchResult.creditsUsed;
             companyProgress.apolloCreditsUsed += matchResult.creditsUsed;
@@ -548,7 +563,7 @@ export async function discoverRecruiters(
         await delay(200);
       }
 
-      // FALLBACK: people API search + contacts search (runs only if match returned nothing)
+      // FALLBACK 1: api_search — free (no credits), org-filtered by name + domain
       if (candidates.length === 0) {
         try {
           const people = await searchPeopleApiSearch(
@@ -559,13 +574,16 @@ export async function discoverRecruiters(
           companyProgress.fromPeopleSearch = people.length;
           await delay(200);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "failed";
-          if (msg.includes("free plan") || msg.includes("API_INACCESSIBLE")) {
-            sawFreePlanBlock = true;
+          const msg = err instanceof Error ? err.message : "";
+          // 403 means this key doesn't have api_search scope — not an error, just limited plan
+          if (!msg.includes("(403)")) {
+            sourceErrors.push(`api_search: ${msg.slice(0, 100)}`);
           }
-          sourceErrors.push(`api_search: ${msg.slice(0, 100)}`);
         }
+      }
 
+      // FALLBACK 2: contacts/search (CRM) — free, 0 credits, but only returns CRM contacts
+      if (candidates.length === 0) {
         try {
           const contactsSearch = await fetchContactsSearch(companyName);
           candidates.push(...contactsSearch);
@@ -578,24 +596,60 @@ export async function discoverRecruiters(
         }
       }
 
-      if (candidates.length === 0 && sourceErrors.length > 0) {
-        errors.push(`${companyName}: ${sourceErrors.join("; ")}`);
+      // FALLBACK 2: Hunter.io domain search — free tier, 25 searches/month
+      if (candidates.length === 0 && (org?.domain || company.domain)) {
+        try {
+          const hunterDomain = org?.domain || company.domain;
+          const hunterResults = await hunterDomainSearch(hunterDomain);
+          for (const h of hunterResults) {
+            if (!h.email) continue;
+            candidates.push({
+              person: {
+                first_name: h.firstName || h.name.split(" ")[0],
+                last_name: h.lastName || h.name.split(" ").slice(1).join(" "),
+                email: h.email,
+                title: h.title,
+                linkedin_url: h.linkedin || undefined,
+                has_email: true,
+              },
+              source: "hunter",
+            });
+          }
+          if (hunterResults.length > 0) {
+            companyProgress.fromContactsSearch += hunterResults.length;
+          }
+          await delay(200);
+        } catch {
+          // Hunter.io is optional — silent failure
+        }
+      }
+
+      if (candidates.length === 0) {
+        sawFreePlanBlock = true;
       }
 
       const merged = mergeCandidates(candidates);
       companyProgress.found = merged.length;
 
-      for (const candidate of merged) {
+      // Sort: prefer candidates that already have an email (no enrichment credit needed)
+      merged.sort((a, b) => {
+        const aHas = a.person.email ? 1 : 0;
+        const bHas = b.person.email ? 1 : 0;
+        return bHas - aHas;
+      });
+
+      const toProcess = merged.slice(0, MAX_PER_COMPANY);
+
+      for (const candidate of toProcess) {
         const dedupeKey = personDedupeKey(candidate.person, companyName);
         if (globalSeen.has(dedupeKey)) continue;
         globalSeen.add(dedupeKey);
 
         let email = (candidate.person.email ?? "").trim();
 
-        // Enrich email for people found via search (not needed for apollo_match — already has email)
+        // Try to reveal email for any candidate that doesn't have one yet
         if (
           !email &&
-          candidate.source !== "apollo_match" &&
           candidate.person.id &&
           candidate.person.has_email !== false &&
           totalCreditsUsed < CREDIT_LIMIT
@@ -630,19 +684,18 @@ export async function discoverRecruiters(
     }
 
     progress.push(companyProgress);
-    onProgress?.(companyProgress);
+    options.onProgress?.(companyProgress);
     await delay(300);
   }
 
   if (sawFreePlanBlock) {
+    const hasHunter = !!process.env.HUNTER_API_KEY;
     warnings.push(
-      "Apollo free plan: People API Search is blocked. people/match (primary path) works — ensure companies.csv has domain column for org enrich."
-    );
-  }
-
-  if (allContacts.length === 0 && companies.length > 0) {
-    warnings.push(
-      "No contacts found. Flow: organizations/enrich → people/match (primary, costs 1 credit/email) → People API Search (fallback, blocked on free plan)."
+      hasHunter
+        ? "Apollo returned no contacts for one or more companies — Hunter.io fallback was used where available."
+        : "Apollo returned no contacts for one or more companies. " +
+          "Add HUNTER_API_KEY to .env to enable Hunter.io fallback (free, 25 searches/month at hunter.io), " +
+          "or add contacts manually on the Review page."
     );
   }
 
@@ -655,7 +708,7 @@ export async function discoverRecruiters(
 
   if (totalCreditsUsed > 0) {
     warnings.push(
-      `Apollo credits used this run: ${totalCreditsUsed}. Remaining budget: ~${Math.max(0, CREDIT_LIMIT - totalCreditsUsed)} of ${CREDIT_LIMIT} monthly. Set APOLLO_CREDIT_LIMIT in .env to adjust.`
+      `Apollo credits used this run: ${totalCreditsUsed}. App cap remaining: ~${Math.max(0, CREDIT_LIMIT - totalCreditsUsed)} of ${CREDIT_LIMIT} (APOLLO_CREDIT_LIMIT). Free tier: up to ~10,000 email reveals/mo for corporate domains.`
     );
   }
 
@@ -672,7 +725,8 @@ export async function testApolloConnection(): Promise<{
 }> {
   const { probeApolloCapabilities } = await import("./apollo-capabilities");
   const caps = await probeApolloCapabilities();
-  const ok = caps.orgEnrich || caps.peopleSearch || caps.peopleMatch;
+  // contactsSearch works on free plan — sufficient for the fallback discovery path
+  const ok = caps.orgEnrich || caps.peopleSearch || caps.peopleMatch || caps.contactsSearch;
   return { ok, error: ok ? undefined : caps.summary };
 }
 

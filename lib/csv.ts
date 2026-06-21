@@ -46,7 +46,8 @@ export const CONTACT_COLUMNS: (keyof Contact)[] = [
 
 export const COMPANY_COLUMNS: (keyof Company)[] = ["company_name", "domain"];
 
-const DATA_DIR = path.join(process.cwd(), "data");
+// DATA_DIR is configurable for Docker/VPS deploys (e.g. DATA_DIR=/var/data/apollo-leads)
+const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 const COMPANIES_PATH = path.join(DATA_DIR, "companies.csv");
 const CONTACTS_PATH = path.join(DATA_DIR, "contacts.csv");
 
@@ -348,13 +349,13 @@ export async function getFileStats() {
       exists: companiesExists,
       count: companiesCount,
       modified: companiesModified,
-      path: "data/companies.csv",
+      source: "upload" as const,
     },
     contacts: {
       exists: contactsExists,
       count: contactsCount,
       modified: contactsModified,
-      path: "data/contacts.csv",
+      source: "upload" as const,
     },
     outreach: {
       emailsPending,

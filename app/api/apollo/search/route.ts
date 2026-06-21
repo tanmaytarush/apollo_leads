@@ -17,8 +17,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const replace = body.replace === true;
+    const selectedNames: string[] = Array.isArray(body.selectedCompanies)
+      ? body.selectedCompanies
+      : [];
+    const maxPerCompany =
+      typeof body.maxPerCompany === "number" && body.maxPerCompany > 0
+        ? body.maxPerCompany
+        : undefined;
 
-    const companies = await readCompanies();
+    let companies = await readCompanies();
     if (companies.length === 0) {
       return NextResponse.json(
         { error: "No companies found. Upload companies.csv first." },
@@ -26,7 +33,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await discoverRecruiters(companies);
+    if (selectedNames.length > 0) {
+      const lower = new Set(selectedNames.map((n) => n.toLowerCase()));
+      companies = companies.filter((c) => lower.has(c.company_name.toLowerCase()));
+      if (companies.length === 0) {
+        return NextResponse.json(
+          { error: "None of the selected companies matched companies.csv." },
+          { status: 400 }
+        );
+      }
+    }
+
+    const result = await discoverRecruiters(companies, { maxPerCompany });
 
     let contacts = result.contacts;
     if (!replace) {

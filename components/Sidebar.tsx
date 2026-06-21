@@ -97,7 +97,7 @@ export function Sidebar() {
 
       <div className="p-3 border-t border-surface-border">
         <div className="px-3 py-2.5 rounded-xl bg-surface-overlay/40 border border-surface-border/60">
-          <p className="text-[11px] font-medium text-gray-500">Local-first · CSV storage</p>
+          <p className="text-[11px] font-medium text-gray-500">Upload CSV · browser-first</p>
           <p className="text-[11px] text-gray-600 mt-0.5">Apollo API · Gmail SMTP</p>
         </div>
       </div>
